@@ -1,0 +1,2 @@
+class AbstractData:
+    pass
