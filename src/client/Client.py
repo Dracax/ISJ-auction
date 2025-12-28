@@ -7,6 +7,7 @@ import logging_config
 from BroadcastAnnounceRequest import BroadcastAnnounceRequest
 from BroadcastAnnounceResponse import BroadcastAnnounceResponse
 from Socket import Socket
+import ipaddress
 
 
 class Client(multiprocessing.Process):
@@ -23,16 +24,23 @@ class Client(multiprocessing.Process):
         logging_config.setup_logging(logging.DEBUG)
         logging.info("Starting client process with PID %d", self.pid)
         self.client_socket = Socket()
-        self.client_address = socket.gethostname()
+        self.client_address = socket.gethostbyname(socket.gethostname())
         self.client_socket.bind((self.client_address, 0))
 
         threading.Thread(
-            target=self.broadcast_sender, args=("255.255.255.255", 8000), daemon=True
+            target=self.broadcast_sender, args=(self.get_broadcast_address(), 8000), daemon=True
         ).start()
 
         while True:
             data, address = self.client_socket.receive_data(BroadcastAnnounceResponse)
             logging.debug("Received data: %s", data)
+
+    def get_broadcast_address(self) -> str:
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+        # Assuming /24 subnet (255.255.255.0)
+        network = ipaddress.IPv4Network(f"{local_ip}/24", strict=False)
+        return str(network.broadcast_address)
 
     def broadcast_sender(self, ip, port=37020):
         logging.debug("Starting broadcast sender")
@@ -52,7 +60,7 @@ class Client(multiprocessing.Process):
         data, server = broadcast_socket.receive_data(BroadcastAnnounceResponse)
         if data:
             logging.info("Received broadcast response: %s", data)
-            self.server_list = data.server_list
+            self.server_list = data.server_addresses
             self.server_to_talk_to = data.leader_address
 
         broadcast_socket.close()
