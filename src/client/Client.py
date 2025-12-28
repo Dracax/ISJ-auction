@@ -1,21 +1,18 @@
 import logging
-import multiprocessing
-import socket
 import threading
 
 import logging_config
+from AbstractClientOrServer import AbstractClientOrServer
 from BroadcastAnnounceRequest import BroadcastAnnounceRequest
 from BroadcastAnnounceResponse import BroadcastAnnounceResponse
 from Socket import Socket
-import ipaddress
 
 
-class Client(multiprocessing.Process):
+class Client(AbstractClientOrServer):
     def __init__(self):
         super(Client, self).__init__()
 
         self.client_socket: Socket | None = None
-        self.client_address: tuple[str, int] | None = None
 
         self.server_list: list[tuple[str, int]] = []
         self.server_to_talk_to: tuple[str, int] | None = None
@@ -24,44 +21,35 @@ class Client(multiprocessing.Process):
         logging_config.setup_logging(logging.DEBUG)
         logging.info("Starting client process with PID %d", self.pid)
         self.client_socket = Socket()
-        self.client_address = socket.gethostbyname(socket.gethostname())
-        self.client_socket.bind((self.client_address, 0))
+        self.client_socket.bind((self.ip, 0))
 
-        threading.Thread(
-            target=self.broadcast_sender, args=(self.get_broadcast_address(), 8000), daemon=True
-        ).start()
+        self.port = self.client_socket.getsockname()[1]
+        self.address = (self.ip, self.port)
+        logging.info(f"Client bound to {self.ip}:{self.port}")
+
+        thread = threading.Thread(target=self.broadcast_sender, args=(self.get_broadcast_address(), 8000), daemon=True)
+        thread.start()
+        thread.join()
+
+        self.client_socket.sendto("Hello Server".encode(), self.server_to_talk_to)  # only for testing
 
         while True:
-            data, address = self.client_socket.receive_data(BroadcastAnnounceResponse)
+            data, _ = self.client_socket.receive_data(BroadcastAnnounceResponse)
             logging.debug("Received data: %s", data)
-
-    def get_broadcast_address(self) -> str:
-        hostname = socket.gethostname()
-        local_ip = socket.gethostbyname(hostname)
-        # Assuming /24 subnet (255.255.255.0)
-        network = ipaddress.IPv4Network(f"{local_ip}/24", strict=False)
-        return str(network.broadcast_address)
 
     def broadcast_sender(self, ip, port=37020):
         logging.debug("Starting broadcast sender")
 
-        broadcast_socket = Socket()
-        # Enable permission to send to broadcast addresses
-        broadcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        broadcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        broadcast_socket = self.create_broadcast_socket()
 
-        my_host = socket.gethostname()
-        my_ip = socket.gethostbyname(my_host)
+        message = BroadcastAnnounceRequest(self.ip, self.host, 80)
 
-        message = BroadcastAnnounceRequest(my_host, my_ip, 80)
+        data = broadcast_socket.send_and_receive_data(message, (ip, port), BroadcastAnnounceResponse, timeout=5, retries=10)
 
-        broadcast_socket.send_data(message, (ip, port))
-
-        data, server = broadcast_socket.receive_data(BroadcastAnnounceResponse)
         if data:
             logging.info("Received broadcast response: %s", data)
             self.server_list = data.server_addresses
-            self.server_to_talk_to = data.leader_address
+            self.server_to_talk_to = tuple(data.leader_address)
 
         broadcast_socket.close()
 
