@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 
 from AbstractData import AbstractData
-from AbstractResponse import AbstractResponse
 
 
 @dataclass
