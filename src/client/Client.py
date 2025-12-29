@@ -42,13 +42,13 @@ class Client(AbstractClientOrServer):
 
         broadcast_socket = self.create_broadcast_socket()
 
-        message = BroadcastAnnounceRequest(self.ip, self.host, 80)
+        message = BroadcastAnnounceRequest(self.host, self.ip, self.port)
 
         data = broadcast_socket.send_and_receive_data(message, (ip, port), BroadcastAnnounceResponse, timeout=5, retries=10)
 
         if data:
             logging.info("Received broadcast response: %s", data)
-            self.server_list = data.server_addresses
+            self.server_list = list(map(tuple, data.server_addresses))
             self.server_to_talk_to = tuple(data.leader_address)
 
         broadcast_socket.close()

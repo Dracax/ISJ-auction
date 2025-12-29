@@ -40,7 +40,7 @@ class Server(AbstractClientOrServer):
 
         # client broadcast listener
         threading.Thread(target=self.broadcast_listen, daemon=True).start()
-        # server broadcast listener and sender
+        # server broadcast listener
         threading.Thread(target=self.broadcast_listen, args=(self.SERVER_BROADCAST_PORT,), daemon=True).start()
         # server broadcast sender
         threading.Thread(target=self.broadcast_sender, args=(self.get_broadcast_address(), self.SERVER_BROADCAST_PORT), daemon=True).start()
