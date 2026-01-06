@@ -1,4 +1,5 @@
 import logging
+import socket
 import threading
 
 import logging_config
@@ -59,6 +60,59 @@ class Client(threading.Thread, AbstractClientOrServer):
             self.server_to_talk_to = tuple(data.leader_address)
 
         broadcast_socket.close()
+
+    def send_get_request[T: AbstractData](self, request: AbstractRequest, response_type: type[T]) -> T | None:
+        if not self.client_socket or not self.server_to_talk_to:
+            logging.error("Client socket or server address not set")
+            return None
+
+        request.request_address = self.client_socket.getsockname()
+        
+        response = self.send_and_receive_data(request, response_type)
+
+        if response:
+            logging.info("Received response: %s", response)
+        else:
+            logging.warning("No response received for request: %s", request)
+
+        return response
+
+    def send_and_receive_data[T: AbstractData](
+            self,
+            data: AbstractRequest,
+            response_type: type[T],
+            retries: int = 0
+    ) -> T | None:
+
+        is_success = False
+        data_received = None
+        for server in [self.server_to_talk_to] + self.server_list:
+            self.client_socket.send_data(data, server)
+            try:
+                data_received, _, = self.client_socket.receive_data(response_type)
+                if data_received:
+                    is_success = True
+                    break
+            except socket.timeout:
+                logging.warning("Socket timed out, trying new ip/port")
+
+        if data_received:
+            return data_received
+
+        if not is_success or data_received is None:
+            self._start_dynamic_discovery(self.get_broadcast_address(), 8000)
+
+        try:
+            self.client_socket.send_data(data, self.server_to_talk_to)
+            data_received, address, = self.client_socket.receive_data(response_type)
+        except socket.timeout:
+            logging.warning("Socket timed out on retry after rediscovery")
+            logging.info("Try again later..")
+            return None
+        if data_received:
+            return data_received
+
+        return None
 
 
 if __name__ == "__main__":
