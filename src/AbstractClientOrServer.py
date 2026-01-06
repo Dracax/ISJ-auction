@@ -1,5 +1,4 @@
 import ipaddress
-import multiprocessing
 import socket
 import struct
 from abc import ABC
@@ -7,12 +6,10 @@ from abc import ABC
 from Socket import Socket
 
 
-class AbstractClientOrServer(multiprocessing.Process, ABC):
+class AbstractClientOrServer(ABC):
     def __init__(self):
-        super(AbstractClientOrServer, self).__init__()
+        super(self).__init__()
 
-        self.host = socket.gethostname()
-        self.ip = socket.gethostbyname(self.host)
         # should be set after binding to the socket
         self.port: int | None = None
         self.address: tuple[str, int] | None = None
@@ -31,8 +28,13 @@ class AbstractClientOrServer(multiprocessing.Process, ABC):
 
         sock.bind(('', multicast_port))
 
-        mreq = struct.pack('4sL', socket.inet_aton(multicast_group), socket.INADDR_ANY)
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+        try:
+            mreq = struct.pack('4s4s', socket.inet_aton(multicast_group), socket.inet_aton('0.0.0.0'))
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+        except OSError:
+            local_ip = socket.gethostbyname(socket.gethostname())
+            mreq = struct.pack('4s4s', socket.inet_aton(multicast_group), socket.inet_aton(local_ip))
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
         return sock
 

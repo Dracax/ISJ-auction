@@ -1,4 +1,5 @@
 import logging
+import multiprocessing
 import socket
 import threading
 
@@ -10,7 +11,7 @@ from Socket import Socket
 from server.MulticastGroupResponse import MulticastGroupResponse
 
 
-class Server(AbstractClientOrServer):
+class Server(multiprocessing.Process, AbstractClientOrServer):
     MULTICAST_GROUP = '224.0.0.1'
     MULTICAST_PORT = 5007
     SERVER_BROADCAST_PORT = 8002
@@ -20,6 +21,9 @@ class Server(AbstractClientOrServer):
 
         self.instance_index = instance_index
         self.server_socket: Socket | None = None
+
+        self.host = socket.gethostname()
+        self.ip = socket.gethostbyname(self.host)
 
         self.multicast_socket = None
 

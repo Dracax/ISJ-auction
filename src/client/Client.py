@@ -3,31 +3,38 @@ import threading
 
 import logging_config
 from AbstractClientOrServer import AbstractClientOrServer
+from AbstractData import AbstractData
 from BroadcastAnnounceRequest import BroadcastAnnounceRequest
 from BroadcastAnnounceResponse import BroadcastAnnounceResponse
 from Socket import Socket
+from request.AbstractRequest import AbstractRequest
 
 
-class Client(AbstractClientOrServer):
+class Client(threading.Thread, AbstractClientOrServer):
     def __init__(self):
         super(Client, self).__init__()
 
         self.client_socket: Socket | None = None
+
+        self.host = socket.gethostname()
+        self.ip = socket.gethostbyname(self.host)
 
         self.server_list: list[tuple[str, int]] = []
         self.server_to_talk_to: tuple[str, int] | None = None
 
     def run(self):
         logging_config.setup_logging(logging.DEBUG)
-        logging.info("Starting client process with PID %d", self.pid)
+        # logging.info("Starting client process with PID %d", self.pid)
         self.client_socket = Socket()
         self.client_socket.bind((self.ip, 0))
+
+        self.client_socket.settimeout(5)  # For testing very high timeout
 
         self.port = self.client_socket.getsockname()[1]
         self.address = (self.ip, self.port)
         logging.info(f"Client bound to {self.ip}:{self.port}")
 
-        thread = threading.Thread(target=self.broadcast_sender, args=(self.get_broadcast_address(), 8000), daemon=True)
+        thread = threading.Thread(target=self._start_dynamic_discovery, args=(self.get_broadcast_address(), 8000), daemon=True)
         thread.start()
         thread.join()
 
@@ -37,7 +44,7 @@ class Client(AbstractClientOrServer):
             data, _ = self.client_socket.receive_data(BroadcastAnnounceResponse)
             logging.debug("Received data: %s", data)
 
-    def broadcast_sender(self, ip, port=37020):
+    def _start_dynamic_discovery(self, ip, port=37020):
         logging.debug("Starting broadcast sender")
 
         broadcast_socket = self.create_broadcast_socket()
