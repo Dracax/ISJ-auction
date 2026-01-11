@@ -13,7 +13,6 @@ from server.MulticastGroupResponse import MulticastGroupResponse
 
 class Server(multiprocessing.Process, AbstractClientOrServer):
     MULTICAST_GROUP = '224.0.0.1'
-    MULTICAST_PORT = 5007
     SERVER_BROADCAST_PORT = 8002
 
     def __init__(self, instance_index: int):
@@ -24,6 +23,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
         self.host = socket.gethostname()
         self.ip = socket.gethostbyname(self.host)
+        self.multicast_port: int = None
 
         self.multicast_socket = None
 
@@ -64,6 +64,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         logging.info("Broadcast listener bound to %s:%d", ADDRESS[0], ADDRESS[1])
 
         while True:
+            data: BroadcastAnnounceRequest  # to satisfy type checker
             data, addr = listen_socket.receive_data(BroadcastAnnounceRequest)
             if data:
                 if data.ip == self.ip and data.port == self.port:
@@ -71,10 +72,10 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                 logging.debug("Received data: %s from %s", data, addr)
                 if self.is_leader() and not data.is_server:
                     listen_socket.send_data(BroadcastAnnounceResponse(self.server_list, self.address), addr)
-                elif self.is_leader() and data.is_server:
+                elif self.multicast_socket and self.is_leader() and data.is_server:
                     logging.info("New server joining: %s", data)
                     self.server_list.append((data.ip, data.port))
-                    listen_socket.send_data(MulticastGroupResponse(self.MULTICAST_GROUP, self.MULTICAST_PORT), addr)
+                    listen_socket.send_data(MulticastGroupResponse(self.MULTICAST_GROUP, self.multicast_port), addr)
 
     def broadcast_sender(self, ip, port=37020):
         logging.debug("Starting broadcast sender")
@@ -82,14 +83,18 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         broadcast_socket = self.create_broadcast_socket()
         message = BroadcastAnnounceRequest(self.host, self.ip, self.port, True)
 
+        data: MulticastGroupResponse | None  # to satisfy type checker
         data = broadcast_socket.send_and_receive_data(message, (ip, port), MulticastGroupResponse, timeout=1, retries=2)
 
         if data:
             logging.info("Subscribing to existing multicast group at %s:%d", data.group_address, data.group_port)
             self.multicast_socket = self.setup_multicast_socket(data.group_address, data.group_port)
+            self.multicast_port = data.group_port
         else:
             logging.info("No broadcast response received, creating new multicast group")
-            self.multicast_socket = self.setup_multicast_socket(self.MULTICAST_GROUP, self.MULTICAST_PORT)
+            self.multicast_socket = self.setup_multicast_socket(self.MULTICAST_GROUP, 0)
+            self.multicast_port = self.multicast_socket.getsockname()[1]
+            logging.info("Created multicast group at %s:%d", self.MULTICAST_GROUP, self.multicast_port)
 
         broadcast_socket.close()
 
