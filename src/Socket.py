@@ -3,7 +3,7 @@ import json
 import logging
 import socket
 
-from AbstractData import AbstractData
+from AbstractData import AbstractData, DATA_TYPE_REGISTRY, DataType
 
 
 class Socket(socket.socket):
@@ -14,15 +14,16 @@ class Socket(socket.socket):
         if not dataclasses.is_dataclass(data):
             raise TypeError("data must be a dataclass instance")
         logging.debug(f"Sending {data} to {address}")
-        self.sendto(str.encode(json.dumps(dataclasses.asdict(data))), address)  # noqa
+        self.sendto(str.encode(self.to_json(data)), address)
 
-    def receive_data[T: AbstractData](self, response_type: type[T]) -> tuple[T, tuple[str, int]]:
-        logging.debug(f"Trying to receive data of type {response_type}")
+    def receive_data(self) -> tuple[AbstractData, tuple[str, int]]:
+        logging.debug("Trying to receive data")
         data, address = self.recvfrom(1024)
         if not data:
             raise ValueError("No data received")
-        data_dict = json.loads(data)
-        response = response_type(**data_dict)
+        response = Socket.parse_to_data(data)
+        if response is None:
+            raise ValueError("Failed to parse data")
         logging.debug(f"Received {response} from {address}")
         return response, address
 
@@ -40,7 +41,7 @@ class Socket(socket.socket):
         for _ in range(retries + 1):
             self.send_data(data, address)
             try:
-                data, address, = self.receive_data(response_type)
+                data, address, = self.receive_data()
                 if data:
                     return data
             except socket.timeout:
@@ -48,3 +49,27 @@ class Socket(socket.socket):
                 continue
 
         return None
+
+    def to_json(self, data_class: AbstractData) -> str:
+        dataclass = dataclasses.asdict(data_class)  # noqa
+        return json.dumps(dataclass, default=lambda o: getattr(o, "value", str(o)))
+
+    @staticmethod
+    def parse_to_data(data: bytes) -> AbstractData | None:
+        if not data:
+            return None
+
+        data_dict = json.loads(data)
+
+        if not data_dict or 'data_type' not in data_dict:
+            return None
+
+        data = AbstractData()
+        data.data_type = DataType(data_dict['data_type'])
+
+        if data.data_type not in DATA_TYPE_REGISTRY:
+            raise ValueError(f"Unknown data type: {data.data_type}")
+
+        data_class = DATA_TYPE_REGISTRY[data.data_type]
+        data_dict.pop('data_type')
+        return data_class(**data_dict)

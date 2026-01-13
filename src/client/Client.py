@@ -41,10 +41,6 @@ class Client(threading.Thread, AbstractClientOrServer):
 
         self.client_socket.sendto("Hello Server".encode(), self.server_to_talk_to)  # only for testing
 
-        while True:
-            data, _ = self.client_socket.receive_data(BroadcastAnnounceResponse)
-            logging.debug("Received data: %s", data)
-
     def _start_dynamic_discovery(self, ip, port=37020):
         logging.debug("Starting broadcast sender")
 
@@ -67,7 +63,7 @@ class Client(threading.Thread, AbstractClientOrServer):
             return None
 
         request.request_address = self.client_socket.getsockname()
-        
+
         response = self.send_and_receive_data(request, response_type)
 
         if response:
@@ -89,7 +85,7 @@ class Client(threading.Thread, AbstractClientOrServer):
         for server in [self.server_to_talk_to] + self.server_list:
             self.client_socket.send_data(data, server)
             try:
-                data_received, _, = self.client_socket.receive_data(response_type)
+                data_received, _, = self.client_socket.receive_data()
                 if data_received:
                     is_success = True
                     break
@@ -104,7 +100,7 @@ class Client(threading.Thread, AbstractClientOrServer):
 
         try:
             self.client_socket.send_data(data, self.server_to_talk_to)
-            data_received, address, = self.client_socket.receive_data(response_type)
+            data_received, address, = self.client_socket.receive_data()
         except socket.timeout:
             logging.warning("Socket timed out on retry after rediscovery")
             logging.info("Try again later..")

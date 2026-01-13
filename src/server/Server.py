@@ -65,7 +65,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
         while True:
             data: BroadcastAnnounceRequest  # to satisfy type checker
-            data, addr = listen_socket.receive_data(BroadcastAnnounceRequest)
+            data, addr = listen_socket.receive_data()
             if data:
                 if data.ip == self.ip and data.port == self.port:
                     continue
