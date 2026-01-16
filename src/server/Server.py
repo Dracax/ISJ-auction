@@ -1,7 +1,6 @@
 import logging
 import multiprocessing
 import socket
-import threading
 import uuid
 
 import logging_config
@@ -58,27 +57,13 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
         # broadcast socket
         ADDRESS = ("0.0.0.0", 8000)
-        self.broadcast_socket: Socket = Socket()
-        self.broadcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.broadcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)  # <-- Hinzufügen
+        self.broadcast_socket: Socket = self.create_broadcast_socket()
 
         self.broadcast_socket.bind(ADDRESS)
 
         self.middleware = MsgMiddleware(self)
-        threading.Thread(target=self.broadcast_listen, daemon=True).start()
         self.middleware.start()
         self.middleware.join()
-
-        # # client broadcast listener
-        # # server broadcast listener
-        # threading.Thread(target=self.broadcast_listen, args=(self.SERVER_BROADCAST_PORT,), daemon=True).start()
-        # # server broadcast sender
-        # threading.Thread(target=self.dynamic_discovery_server_broadcast,
-        #                  args=(self.get_broadcast_address(), self.SERVER_BROADCAST_PORT), daemon=True).start()
-        #
-        # while True:
-        #     data, address = self.unicast_socket.recvfrom(1024)
-        #     logging.debug("Received data: %s", data)
 
     def broadcast_listen(self, port=8000):
         logging.debug("Starting broadcast listener")
@@ -132,8 +117,9 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         # Bully Algo send vote request to all server with bigger UUID than self
         logging.info("Starting bully algo")
         logging.info("Own Server Id: %s", self.server_id)
+        self.unicast_socket.send_data(UnicastVoteRequest("sadfsad", "!sdf", 12), (self.ip, self.port))
         for current_server in self.other_server_list:
-            if current_server.UUID > str(self.server_id):  # todo: DOES THIS WORK?
+            if current_server.uuid.int > self.server_id.int:  # todo: DOES THIS WORK?
                 logging.info("Compared Server ID is bigger, sending vote request: %s", self.server_id)
                 # Unicast msg to server
                 data: UnicastVoteRequest | None  # to satisfy type checker
@@ -145,12 +131,12 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         # TODO: Multicast msg to all servers
         return
 
-    def receive_message(self, msg: AbstractData):
+    def receive_message(self, msg: AbstractData, addr: tuple[str, int]):
         # TODO call method acording to msg
         # midleware --> receive_message
 
         match msg:  # TODO: isinstance?
-            case UnicastVoteRequest:
+            case BroadcastAnnounceRequest():
                 pass
 
 

@@ -21,10 +21,11 @@ class Socket(socket.socket):
         data, address = self.recvfrom(1024)
         if not data:
             raise ValueError("No data received")
+        logging.debug(f"Received {data} from {address}")
+        
         response = Socket.parse_to_data(data)
         if response is None:
             raise ValueError("Failed to parse data")
-        logging.debug(f"Received {response} from {address}")
         return response, address
 
     def send_and_receive_data[T: AbstractData](
