@@ -7,6 +7,7 @@ class DataType(Enum):
     BROADCAST_ANNOUNCE_RESPONSE = "BroadcastAnnounceResponse"
     MULTICAST_GROUP_RESPONSE = "MulticastGroupResponse"
     AUCTION_RETRIEVE_REQUEST = "AuctionRetrieveRequest"
+    UNICAST_VOTE_REQUEST = "UnicastVoteRequest"
 
 
 @dataclass

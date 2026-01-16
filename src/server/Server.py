@@ -2,12 +2,16 @@ import logging
 import multiprocessing
 import socket
 import threading
+import uuid
 
 import logging_config
 from AbstractClientOrServer import AbstractClientOrServer
+from AbstractData import AbstractData, DataType
 from BroadcastAnnounceRequest import BroadcastAnnounceRequest
 from BroadcastAnnounceResponse import BroadcastAnnounceResponse
+from ServerDataRepresentation import ServerDataRepresentation
 from Socket import Socket
+from UnicastVoteRequest import UnicastVoteRequest
 from server.MulticastGroupResponse import MulticastGroupResponse
 
 
@@ -27,7 +31,10 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
         self.multicast_socket = None
 
+        self.server_id = uuid.uuid4()
+        logging.debug(self.server_id)
         self.server_list: list[tuple[str, int]] = []
+        self.other_server_list: list[ServerDataRepresentation] = []
 
     def run(self):
         # Configure logging for this process
@@ -47,7 +54,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         # server broadcast listener
         threading.Thread(target=self.broadcast_listen, args=(self.SERVER_BROADCAST_PORT,), daemon=True).start()
         # server broadcast sender
-        threading.Thread(target=self.broadcast_sender, args=(self.get_broadcast_address(), self.SERVER_BROADCAST_PORT), daemon=True).start()
+        threading.Thread(target=self.dynamic_discovery_server_broadcast, args=(self.get_broadcast_address(), self.SERVER_BROADCAST_PORT), daemon=True).start()
 
         while True:
             data, address = self.server_socket.recvfrom(1024)
@@ -77,7 +84,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                     self.server_list.append((data.ip, data.port))
                     listen_socket.send_data(MulticastGroupResponse(self.MULTICAST_GROUP, self.multicast_port), addr)
 
-    def broadcast_sender(self, ip, port=37020):
+    def dynamic_discovery_server_broadcast(self, ip, port=37020):
         logging.debug("Starting broadcast sender")
 
         broadcast_socket = self.create_broadcast_socket()
@@ -100,6 +107,33 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
     def is_leader(self) -> bool:
         return self.instance_index == 0  # TODO: implement leader election
+
+    def bully_algo(self):
+        # Bully Algo send vote request to all server with bigger UUID than self
+        logging.info("Starting bully algo")
+        logging.info("Own Server Id: %s", self.server_id)
+        for current_server in self.other_server_list:
+            if current_server.UUID > str(self.server_id): # todo: DOES THIS WORK?
+                logging.info("Compared Server ID is bigger, sending vote request: %s", self.server_id)
+                # Unicast msg to server
+                data: UnicastVoteRequest | None  # to satisfy type checker
+                current_server_socket = self.create_unicast_socket()
+                current_server_socket.send_data(UnicastVoteRequest(), current_server.address)
+        # Now wait if anyone with higher id responds
+
+
+        # No Replies from others, sending won election to all servers in multicast group
+        # TODO: Multicast msg to all servers
+        return
+
+    def receive_message(self, msg: AbstractData):
+        # TODO call method acording to msg
+        # midleware --> receive_message
+
+        match msg: # TODO: isinstance?
+            case UnicastVoteRequest:
+                pass
+
 
 
 if __name__ == "__main__":
