@@ -7,11 +7,13 @@ import uuid
 
 import logging_config
 from AbstractClientOrServer import AbstractClientOrServer
+from request.AbstractData import BullyElectedLeaderRequest
 from request.AbstractData.AbstractData import AbstractData
 from request.AbstractData.BroadcastAnnounceRequest import BroadcastAnnounceRequest
 from request.AbstractData.BroadcastAnnounceResponse import BroadcastAnnounceResponse
 from ServerDataRepresentation import ServerDataRepresentation
 from Socket import Socket
+from request.AbstractData.BullyAcceptVotingParticipationResponse import BullyAcceptVotingParticipationResponse
 from request.AbstractData.UnicastVoteRequest import UnicastVoteRequest
 from server.MsgMiddleware import MsgMiddleware
 from request.AbstractData.MulticastGroupResponse import MulticastGroupResponse
@@ -43,6 +45,10 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         logging.debug(self.server_id)
         self.server_list: list[tuple[str, int]] = []
         self.other_server_list: list[ServerDataRepresentation] = []
+        self.leader: ServerDataRepresentation = None
+
+        # Bully Algo
+        self.electing_new_leader: bool = False
 
     def run(self):
         # Configure logging for this process
@@ -109,23 +115,42 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         # Bully Algo send vote request to all server with bigger UUID than self
         logging.info("Starting bully algo")
         logging.info("Own Server Id: %s", self.server_id)
+        self.electing_new_leader = True
         for current_server in self.other_server_list:
-            if current_server.uuid.int > self.server_id.int:  # todo: DOES THIS WORK?
+            if current_server.uuid.int > self.server_id.int:
                 logging.info("Compared Server ID is bigger, sending vote request: %s", self.server_id)
                 # Unicast msg to server
                 data: UnicastVoteRequest | None  # to satisfy type checker
-                self.unicast_socket.send_data(UnicastVoteRequest("sadfsad", self.ip, self.port), (current_server.ip, current_server.port))
+                self.unicast_socket.send_data(UnicastVoteRequest("idk TODO", self.ip, self.port), (current_server.ip, current_server.port))
         # Now wait if anyone with higher id responds
+        # TODO: Is sleep going to "kill" Server?
+        if self.electing_new_leader == False:
+            # TODO: Wait for x seconds
+            return
 
         # No Replies from others, sending won election to all servers in multicast group
         # TODO: Multicast msg to all servers
         return
 
+
+
     def receive_message(self, msg: AbstractData, addr: tuple[str, int]):
-        # TODO call method acording to msg
         match msg:
             case BroadcastAnnounceRequest():
                 self.dynamic_discovery(msg, addr)
+            case BullyElectedLeaderRequest():
+                if msg.uuid < self.server_id:
+                    self.bully_algo()
+                else:
+                    temp: ServerDataRepresentation
+                    temp.ip = msg.ip
+                    temp.port = msg.port
+                    temp.uuid = msg.uuid
+                    self.leader = temp
+            case UnicastVoteRequest():
+                if msg.uuid < self.server_id:
+                    self.unicast_socket.send_data(BullyAcceptVotingParticipationResponse("idk TODO", self.ip, self.port), (addr[0], addr[1]))
+                    self.bully_algo()
 
 
 if __name__ == "__main__":

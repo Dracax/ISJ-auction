@@ -45,8 +45,6 @@ class AbstractClientOrServer(ABC):
         broadcast_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         return broadcast_socket
 
-    # todo: all config here (1 unicast, 1 broadcast, 1 multicast)
-
     @staticmethod
     def create_unicast_socket() -> Socket:
         unicast_socket = Socket()

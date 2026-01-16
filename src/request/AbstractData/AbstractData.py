@@ -8,7 +8,8 @@ class DataType(Enum):
     MULTICAST_GROUP_RESPONSE = "MulticastGroupResponse"
     AUCTION_RETRIEVE_REQUEST = "AuctionRetrieveRequest"
     UNICAST_VOTE_REQUEST = "UnicastVoteRequest"
-    BULLY_ELECTED_LEADER = "BullyElectedLeader"
+    BULLY_ELECTED_LEADER_REQUEST = "BullyElectedLeaderRequest"
+    BULLY_ACCEPT_VOTING_PARTICIPATION_RESPONSE = "BullyAcceptVotingParticipationResponse"
 
 
 @dataclass
