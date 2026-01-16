@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from uuid import UUID
 
 from request.AbstractData.AbstractData import AbstractData, register_data_type, DataType
 
@@ -9,5 +10,5 @@ class BroadcastAnnounceRequest(AbstractData):
     host: str
     ip: str
     port: int
-    uuid: str
+    uuid: UUID
     is_server: bool = False
