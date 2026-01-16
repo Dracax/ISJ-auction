@@ -8,15 +8,17 @@ import uuid
 import logging_config
 from AbstractClientOrServer import AbstractClientOrServer
 from request.AbstractData import BullyElectedLeaderRequest
+from ServerDataRepresentation import ServerDataRepresentation
+from Socket import Socket
 from request.AbstractData.AbstractData import AbstractData
 from request.AbstractData.BroadcastAnnounceRequest import BroadcastAnnounceRequest
 from request.AbstractData.BroadcastAnnounceResponse import BroadcastAnnounceResponse
 from ServerDataRepresentation import ServerDataRepresentation
 from Socket import Socket
 from request.AbstractData.BullyAcceptVotingParticipationResponse import BullyAcceptVotingParticipationResponse
+from request.AbstractData.MulticastGroupResponse import MulticastGroupResponse
 from request.AbstractData.UnicastVoteRequest import UnicastVoteRequest
 from server.MsgMiddleware import MsgMiddleware
-from request.AbstractData.MulticastGroupResponse import MulticastGroupResponse
 
 
 class Server(multiprocessing.Process, AbstractClientOrServer):
@@ -82,14 +84,14 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             self.unicast_socket.send_data(BroadcastAnnounceResponse(self.server_list, self.address), addr)
         elif self.multicast_socket and self.is_leader() and data.is_server:
             logging.info("New server joining: %s", data)
-            self.other_server_list.append(ServerDataRepresentation(uuid.UUID(data.uuid), data.ip, data.port))
+            self.other_server_list.append(ServerDataRepresentation(data.uuid, data.ip, data.port))
             self.unicast_socket.send_data(MulticastGroupResponse(self.MULTICAST_GROUP, self.multicast_port), addr)
 
     def dynamic_discovery_server_broadcast(self, ip, port=37020):
         logging.debug("Starting broadcast sender")
 
         broadcast_socket = self.create_broadcast_socket()
-        message = BroadcastAnnounceRequest(self.host, self.ip, self.port, str(self.server_id), True)
+        message = BroadcastAnnounceRequest(self.host, self.ip, self.port, self.server_id, True)
 
         data: MulticastGroupResponse | None  # to satisfy type checker
         data = broadcast_socket.send_and_receive_data(message, (ip, port), MulticastGroupResponse, timeout=1,

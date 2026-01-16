@@ -1,13 +1,14 @@
 import logging
 import socket
 import threading
+import uuid
 
 import logging_config
 from AbstractClientOrServer import AbstractClientOrServer
+from Socket import Socket
 from request.AbstractData.AbstractData import AbstractData
 from request.AbstractData.BroadcastAnnounceRequest import BroadcastAnnounceRequest
 from request.AbstractData.BroadcastAnnounceResponse import BroadcastAnnounceResponse
-from Socket import Socket
 from request.AbstractRequest import AbstractRequest
 
 
@@ -48,7 +49,7 @@ class Client(threading.Thread, AbstractClientOrServer):
         broadcast_socket = self.create_broadcast_socket()
 
         message = BroadcastAnnounceRequest(self.host, self.ip, self.port,
-                                           "uuid-placeholder")  # TODO: generate uuid do we need it?
+                                           uuid.uuid4())  # TODO: generate uuid do we need it?
 
         data = broadcast_socket.send_and_receive_data(message, (ip, port), BroadcastAnnounceResponse, timeout=5, retries=10)
 
