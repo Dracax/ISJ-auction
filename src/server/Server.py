@@ -7,14 +7,14 @@ import uuid
 
 import logging_config
 from AbstractClientOrServer import AbstractClientOrServer
-from AbstractData import AbstractData
-from BroadcastAnnounceRequest import BroadcastAnnounceRequest
-from BroadcastAnnounceResponse import BroadcastAnnounceResponse
+from request.AbstractData.AbstractData import AbstractData
+from request.AbstractData.BroadcastAnnounceRequest import BroadcastAnnounceRequest
+from request.AbstractData.BroadcastAnnounceResponse import BroadcastAnnounceResponse
 from ServerDataRepresentation import ServerDataRepresentation
 from Socket import Socket
-from UnicastVoteRequest import UnicastVoteRequest
+from request.AbstractData.UnicastVoteRequest import UnicastVoteRequest
 from server.MsgMiddleware import MsgMiddleware
-from server.MulticastGroupResponse import MulticastGroupResponse
+from request.AbstractData.MulticastGroupResponse import MulticastGroupResponse
 
 
 class Server(multiprocessing.Process, AbstractClientOrServer):
@@ -109,14 +109,12 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         # Bully Algo send vote request to all server with bigger UUID than self
         logging.info("Starting bully algo")
         logging.info("Own Server Id: %s", self.server_id)
-        self.unicast_socket.send_data(UnicastVoteRequest("sadfsad", "!sdf", 12), (self.ip, self.port))
         for current_server in self.other_server_list:
             if current_server.uuid.int > self.server_id.int:  # todo: DOES THIS WORK?
                 logging.info("Compared Server ID is bigger, sending vote request: %s", self.server_id)
                 # Unicast msg to server
                 data: UnicastVoteRequest | None  # to satisfy type checker
-                current_server_socket = self.create_unicast_socket()
-                current_server_socket.send_data(UnicastVoteRequest(), current_server.address)
+                self.unicast_socket.send_data(UnicastVoteRequest("sadfsad", self.ip, self.port), (current_server.ip, current_server.port))
         # Now wait if anyone with higher id responds
 
         # No Replies from others, sending won election to all servers in multicast group

@@ -3,7 +3,7 @@ import json
 import logging
 import socket
 
-from AbstractData import AbstractData, DATA_TYPE_REGISTRY, DataType
+from request.AbstractData.AbstractData import AbstractData, DATA_TYPE_REGISTRY, DataType
 
 
 class Socket(socket.socket):

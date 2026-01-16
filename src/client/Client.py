@@ -4,9 +4,9 @@ import threading
 
 import logging_config
 from AbstractClientOrServer import AbstractClientOrServer
-from AbstractData import AbstractData
-from BroadcastAnnounceRequest import BroadcastAnnounceRequest
-from BroadcastAnnounceResponse import BroadcastAnnounceResponse
+from request.AbstractData.AbstractData import AbstractData
+from request.AbstractData.BroadcastAnnounceRequest import BroadcastAnnounceRequest
+from request.AbstractData.BroadcastAnnounceResponse import BroadcastAnnounceResponse
 from Socket import Socket
 from request.AbstractRequest import AbstractRequest
 
