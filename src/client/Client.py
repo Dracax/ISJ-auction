@@ -35,7 +35,8 @@ class Client(threading.Thread, AbstractClientOrServer):
         self.address = (self.ip, self.port)
         logging.info(f"Client bound to {self.ip}:{self.port}")
 
-        thread = threading.Thread(target=self._start_dynamic_discovery, args=(self.get_broadcast_address(), 8000), daemon=True)
+        thread = threading.Thread(target=self._start_dynamic_discovery, args=(self.get_broadcast_address(), 8000),
+                                  daemon=True)
         thread.start()
         thread.join()
 
@@ -46,7 +47,8 @@ class Client(threading.Thread, AbstractClientOrServer):
 
         broadcast_socket = self.create_broadcast_socket()
 
-        message = BroadcastAnnounceRequest(self.host, self.ip, self.port)
+        message = BroadcastAnnounceRequest(self.host, self.ip, self.port,
+                                           "uuid-placeholder")  # TODO: generate uuid do we need it?
 
         data = broadcast_socket.send_and_receive_data(message, (ip, port), BroadcastAnnounceResponse, timeout=5, retries=10)
 

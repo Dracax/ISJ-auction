@@ -9,4 +9,5 @@ class BroadcastAnnounceRequest(AbstractData):
     host: str
     ip: str
     port: int
+    uuid: str
     is_server: bool = False

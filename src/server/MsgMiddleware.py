@@ -25,6 +25,8 @@ class MsgMiddleware(threading.Thread):
             readable, _, _ = select.select(current_sockets, [], [], 1.0)
             for sock in readable:
                 data, addr = sock.receive_data()
+                if data is None:
+                    continue
                 if sock == self.server.broadcast_socket:
                     self.handle_broadcast_message(data, addr)
                 elif sock == self.server.unicast_socket:
@@ -42,12 +44,12 @@ class MsgMiddleware(threading.Thread):
         pass
         # process multicast message
 
-    def add_socket(self, sock, handler_name: str):
+    def add_socket(self, sock):
         """Fügt einen Socket dynamisch hinzu."""
         with self._lock:
             if sock not in self.sockets:
                 self.sockets.append(sock)
-                logging.info(f"Socket hinzugefügt: {handler_name}")
+                logging.info(f"Socket hinzugefügt:")
 
     def remove_socket(self, sock):
         """Entfernt einen Socket."""

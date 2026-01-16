@@ -22,8 +22,10 @@ class Socket(socket.socket):
         if not data:
             raise ValueError("No data received")
         logging.debug(f"Received {data} from {address}")
-        
-        response = Socket.parse_to_data(data)
+        try:
+            response = Socket.parse_to_data(data)
+        except json.decoder.JSONDecodeError:
+            return None, address
         if response is None:
             raise ValueError("Failed to parse data")
         return response, address
