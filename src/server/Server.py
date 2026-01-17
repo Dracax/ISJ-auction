@@ -1,5 +1,6 @@
 import logging
 import multiprocessing
+import os
 import socket
 import threading
 import time
@@ -7,18 +8,20 @@ import uuid
 
 import logging_config
 from AbstractClientOrServer import AbstractClientOrServer
-from request.AbstractData.AbstractData import AbstractData
-from request.AbstractData.BroadcastAnnounceRequest import BroadcastAnnounceRequest
-from request.AbstractData.BroadcastAnnounceResponse import BroadcastAnnounceResponse
 from ServerDataRepresentation import ServerDataRepresentation
 from Socket import Socket
+from request.AbstractData.BroadcastAnnounceRequest import BroadcastAnnounceRequest
+from request.AbstractData.BroadcastAnnounceResponse import BroadcastAnnounceResponse
+from request.AbstractData.MulticastGroupResponse import MulticastGroupResponse
 from request.AbstractData.UnicastVoteRequest import UnicastVoteRequest
 from server.MsgMiddleware import MsgMiddleware
-from request.AbstractData.MulticastGroupResponse import MulticastGroupResponse
 
 
 class Server(multiprocessing.Process, AbstractClientOrServer):
     MULTICAST_GROUP = '224.0.0.1'
+    MULTICAST_TEST_PORT = 8011
+    IS_PRODUCTION = os.environ.get('PRODUCTION', 'true') == 'true'
+
     SERVER_BROADCAST_PORT = 8000
 
     def __init__(self, instance_index: int):
@@ -47,7 +50,10 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
     def run(self):
         # Configure logging for this process
         logging_config.setup_logging(logging.DEBUG)
-        logging.info("Starting server instance")
+        if self.IS_PRODUCTION:
+            logging.info("Production: starting server process with PID %d", os.getpid())
+        else:
+            logging.info("Development: starting server process with PID %d", os.getpid())
 
         # unicast socket
         self.unicast_socket: Socket = self.create_unicast_socket()
@@ -109,7 +115,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             logging.info("Created multicast group at %s:%d", self.MULTICAST_GROUP, self.multicast_port)
 
         broadcast_socket.close()
-        self.middleware.add_socket(self.multicast_socket)
+        self.middleware.add_socket(self.multicast_socket, 'multicast')
 
     def is_leader(self) -> bool:
         return self.instance_index == 0  # TODO: implement leader election
@@ -132,7 +138,6 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
     def receive_message(self):
         while True:
-            time.sleep(2)
             data, addr = self.middleware.message_queue.get()
             logging.info("Server received message: %s from %s", data, addr)
             # TODO call method acording to msg
