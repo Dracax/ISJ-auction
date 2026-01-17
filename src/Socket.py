@@ -18,7 +18,6 @@ class Socket(socket.socket):
         self.sendto(str.encode(self.to_json(data)), address)
 
     def receive_data(self) -> tuple[AbstractData, tuple[str, int]]:
-        logging.debug("Trying to receive data")
         data, address = self.recvfrom(1024)
         if not data:
             raise ValueError("No data received")

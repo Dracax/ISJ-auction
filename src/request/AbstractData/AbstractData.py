@@ -9,6 +9,8 @@ class DataType(Enum):
     AUCTION_RETRIEVE_REQUEST = "AuctionRetrieveRequest"
     UNICAST_VOTE_REQUEST = "UnicastVoteRequest"
     BULLY_ELECTED_LEADER = "BullyElectedLeader"
+    MULTICAST_MSG_REQUEST = "MulticastMsgRequest"
+    TEST = "TestMulticast"
 
 
 @dataclass
