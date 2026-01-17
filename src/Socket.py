@@ -2,6 +2,7 @@ import dataclasses
 import json
 import logging
 import socket
+from uuid import UUID
 
 from request.AbstractData.AbstractData import AbstractData, DATA_TYPE_REGISTRY, DataType
 
@@ -67,12 +68,34 @@ class Socket(socket.socket):
         if not data_dict or 'data_type' not in data_dict:
             return None
 
-        data = AbstractData()
-        data.data_type = DataType(data_dict['data_type'])
+        data_type = DataType(data_dict['data_type'])
 
-        if data.data_type not in DATA_TYPE_REGISTRY:
-            raise ValueError(f"Unknown data type: {data.data_type}")
+        if data_type not in DATA_TYPE_REGISTRY:
+            raise ValueError(f"Unknown data type: {data_type}")
 
-        data_class = DATA_TYPE_REGISTRY[data.data_type]
+        data_class = DATA_TYPE_REGISTRY[data_type]
         data_dict.pop('data_type')
-        return data_class(**data_dict)
+
+        # Separate init=True and init=False fields
+        init_fields = {}
+        post_init_fields = {}
+
+        for f in dataclasses.fields(data_class):
+            if f.name in data_dict:
+                value = data_dict[f.name]
+                # Convert UUID strings back to UUID objects
+                if f.type == UUID and isinstance(value, str):
+                    value = UUID(value)
+                if f.init:
+                    init_fields[f.name] = value
+                else:
+                    post_init_fields[f.name] = value
+
+        # Create instance with init fields only
+        instance = data_class(**init_fields)
+
+        # Set the init=False fields after creation
+        for name, value in post_init_fields.items():
+            setattr(instance, name, value)
+
+        return instance

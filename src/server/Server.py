@@ -65,8 +65,16 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         threading.Thread(target=self.dynamic_discovery_server_broadcast,
                          args=(self.get_broadcast_address(), self.SERVER_BROADCAST_PORT), daemon=True).start()
 
-        self.middleware = MsgMiddleware(self)
+        self.middleware = MsgMiddleware(self.server_id, {
+            self.unicast_socket: 'unicast',
+            self.broadcast_socket: 'broadcast',
+        })
+        if not self.IS_PRODUCTION:
+            self.middleware.add_server(uuid.UUID("2add30b2-5762-4046-bf81-0acdd8cbde2c"))  # for testing
+
         self.middleware.start()
+
+        self.receive_message()
         self.middleware.join()
 
     def dynamic_discovery(self, data: BroadcastAnnounceRequest, addr: tuple[str, int]):
@@ -74,16 +82,17 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             return
         if self.is_leader() and not data.is_server:
             self.unicast_socket.send_data(BroadcastAnnounceResponse(self.server_list, self.address), addr)
-        elif self.multicast_socket and self.is_leader() and data.is_server:
+        elif self.multicast_socket and data.is_server:
             logging.info("New server joining: %s", data)
-            self.other_server_list.append(ServerDataRepresentation(uuid.UUID(data.uuid), data.ip, data.port))
+            self.middleware.add_server(data.uuid)
+            self.other_server_list.append(ServerDataRepresentation(data.uuid, data.ip, data.port))
             self.unicast_socket.send_data(MulticastGroupResponse(self.MULTICAST_GROUP, self.multicast_port), addr)
 
     def dynamic_discovery_server_broadcast(self, ip, port=37020):
         logging.debug("Starting broadcast sender")
 
         broadcast_socket = self.create_broadcast_socket()
-        message = BroadcastAnnounceRequest(self.host, self.ip, self.port, str(self.server_id), True)
+        message = BroadcastAnnounceRequest(self.host, self.ip, self.port, self.server_id, True)
 
         data: MulticastGroupResponse | None  # to satisfy type checker
         data = broadcast_socket.send_and_receive_data(message, (ip, port), MulticastGroupResponse, timeout=1,
@@ -95,7 +104,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             self.multicast_port = data.group_port
         else:
             logging.info("No broadcast response received, creating new multicast group")
-            self.multicast_socket = self.setup_multicast_socket(self.MULTICAST_GROUP, 0)
+            self.multicast_socket = self.setup_multicast_socket(self.MULTICAST_GROUP, self.MULTICAST_TEST_PORT if not self.IS_PRODUCTION else 0)
             self.multicast_port = self.multicast_socket.getsockname()[1]
             logging.info("Created multicast group at %s:%d", self.MULTICAST_GROUP, self.multicast_port)
 
@@ -121,18 +130,22 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         # TODO: Multicast msg to all servers
         return
 
-    def receive_message(self, msg: AbstractData, addr: tuple[str, int]):
-        # TODO call method acording to msg
-        match msg:
-            case BroadcastAnnounceRequest():
-                self.dynamic_discovery(msg, addr)
+    def receive_message(self):
+        while True:
+            time.sleep(2)
+            data, addr = self.middleware.message_queue.get()
+            logging.info("Server received message: %s from %s", data, addr)
+            # TODO call method acording to msg
+            match data:
+                case BroadcastAnnounceRequest():
+                    self.dynamic_discovery(data, addr)
 
 
 if __name__ == "__main__":
     logging_config.setup_logging(logging.DEBUG)
     servers = []
     try:
-        for i in range(2):
+        for i in range(1):
             server = Server(instance_index=i)
             server.start()
             time.sleep(4)
