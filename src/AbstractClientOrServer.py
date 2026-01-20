@@ -23,11 +23,16 @@ class AbstractClientOrServer(ABC):
 
     @staticmethod
     def setup_multicast_socket(multicast_group, multicast_port):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock = Socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-        sock.bind(('', multicast_port))
+        # Bind to all interfaces
+        sock.bind(('0.0.0.0', multicast_port))
 
+        # Enable loopback for same-machine testing
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
+
+        # Join multicast group
         try:
             mreq = struct.pack('4s4s', socket.inet_aton(multicast_group), socket.inet_aton('0.0.0.0'))
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)

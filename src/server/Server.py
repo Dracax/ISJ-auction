@@ -1,5 +1,6 @@
 import logging
 import multiprocessing
+import os
 import socket
 import threading
 import time
@@ -8,9 +9,6 @@ import uuid
 import logging_config
 from AbstractClientOrServer import AbstractClientOrServer
 from request.AbstractData import BullyElectedLeaderRequest
-from ServerDataRepresentation import ServerDataRepresentation
-from Socket import Socket
-from request.AbstractData.AbstractData import AbstractData
 from request.AbstractData.BroadcastAnnounceRequest import BroadcastAnnounceRequest
 from request.AbstractData.BroadcastAnnounceResponse import BroadcastAnnounceResponse
 from ServerDataRepresentation import ServerDataRepresentation
@@ -23,6 +21,9 @@ from server.MsgMiddleware import MsgMiddleware
 
 class Server(multiprocessing.Process, AbstractClientOrServer):
     MULTICAST_GROUP = '224.0.0.1'
+    MULTICAST_TEST_PORT = 8011
+    IS_PRODUCTION = os.environ.get('PRODUCTION', 'true') == 'true'
+
     SERVER_BROADCAST_PORT = 8000
 
     def __init__(self, instance_index: int):
@@ -55,7 +56,10 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
     def run(self):
         # Configure logging for this process
         logging_config.setup_logging(logging.DEBUG)
-        logging.info("Starting server instance")
+        if self.IS_PRODUCTION:
+            logging.info("Production: starting server process with PID %d", os.getpid())
+        else:
+            logging.info("Development: starting server process with PID %d", os.getpid())
 
         # unicast socket
         self.unicast_socket: Socket = self.create_unicast_socket()
@@ -73,8 +77,16 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         threading.Thread(target=self.dynamic_discovery_server_broadcast,
                          args=(self.get_broadcast_address(), self.SERVER_BROADCAST_PORT), daemon=True).start()
 
-        self.middleware = MsgMiddleware(self)
+        self.middleware = MsgMiddleware(self.server_id, {
+            self.unicast_socket: 'unicast',
+            self.broadcast_socket: 'broadcast',
+        })
+        if not self.IS_PRODUCTION:
+            self.middleware.add_server(uuid.UUID("2add30b2-5762-4046-bf81-0acdd8cbde2c"))  # for testing
+
         self.middleware.start()
+
+        self.receive_message()
         self.middleware.join()
 
     def dynamic_discovery(self, data: BroadcastAnnounceRequest, addr: tuple[str, int]):
@@ -82,8 +94,9 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             return
         if self.is_leader() and not data.is_server:
             self.unicast_socket.send_data(BroadcastAnnounceResponse(self.server_list, self.address), addr)
-        elif self.multicast_socket and self.is_leader() and data.is_server:
+        elif self.multicast_socket and data.is_server:
             logging.info("New server joining: %s", data)
+            self.middleware.add_server(data.uuid)
             self.other_server_list.append(ServerDataRepresentation(data.uuid, data.ip, data.port))
             self.unicast_socket.send_data(MulticastGroupResponse(self.MULTICAST_GROUP, self.multicast_port), addr)
 
@@ -103,12 +116,12 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             self.multicast_port = data.group_port
         else:
             logging.info("No broadcast response received, creating new multicast group")
-            self.multicast_socket = self.setup_multicast_socket(self.MULTICAST_GROUP, 0)
+            self.multicast_socket = self.setup_multicast_socket(self.MULTICAST_GROUP, self.MULTICAST_TEST_PORT if not self.IS_PRODUCTION else 0)
             self.multicast_port = self.multicast_socket.getsockname()[1]
             logging.info("Created multicast group at %s:%d", self.MULTICAST_GROUP, self.multicast_port)
 
         broadcast_socket.close()
-        self.middleware.add_socket(self.multicast_socket)
+        self.middleware.add_socket(self.multicast_socket, 'multicast')
 
     def is_leader(self) -> bool:
         return self.instance_index == 0  # TODO: implement leader election
@@ -134,32 +147,34 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         # TODO: Multicast msg to all servers
         return
 
-
-
-    def receive_message(self, msg: AbstractData, addr: tuple[str, int]):
-        match msg:
-            case BroadcastAnnounceRequest():
-                self.dynamic_discovery(msg, addr)
-            case BullyElectedLeaderRequest():
-                if msg.uuid < self.server_id:
-                    self.bully_algo()
-                else:
-                    temp: ServerDataRepresentation
-                    temp.ip = msg.ip
-                    temp.port = msg.port
-                    temp.uuid = msg.uuid
-                    self.leader = temp
-            case UnicastVoteRequest():
-                if msg.uuid < self.server_id:
-                    self.unicast_socket.send_data(BullyAcceptVotingParticipationResponse("idk TODO", self.ip, self.port), (addr[0], addr[1]))
-                    self.bully_algo()
+    def receive_message(self):
+        while True:
+            data, addr = self.middleware.message_queue.get()
+            logging.info("Server received message: %s from %s", data, addr)
+            # TODO call method acording to msg
+            match data:
+                case BroadcastAnnounceRequest():
+                    self.dynamic_discovery(data, addr)
+                case BullyElectedLeaderRequest():
+                    if data.uuid < self.server_id:
+                        self.bully_algo()
+                    else:
+                        temp: ServerDataRepresentation
+                        temp.ip = data.ip
+                        temp.port = data.port
+                        temp.uuid = data.uuid
+                        self.leader = temp
+                case UnicastVoteRequest():
+                    if data.uuid < self.server_id:
+                        self.unicast_socket.send_data(BullyAcceptVotingParticipationResponse("idk TODO", self.ip, self.port), (addr[0], addr[1]))
+                        self.bully_algo()
 
 
 if __name__ == "__main__":
     logging_config.setup_logging(logging.DEBUG)
     servers = []
     try:
-        for i in range(2):
+        for i in range(1):
             server = Server(instance_index=i)
             server.start()
             time.sleep(4)

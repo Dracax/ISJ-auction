@@ -6,6 +6,7 @@ import socket
 import typing
 import uuid
 from typing import get_origin, get_args
+from uuid import UUID
 
 from request.AbstractData.AbstractData import AbstractData, DATA_TYPE_REGISTRY, DataType
 
@@ -94,7 +95,6 @@ class Socket(socket.socket):
         self.sendto(str.encode(self.to_json(data)), address)
 
     def receive_data(self) -> tuple[AbstractData, tuple[str, int]]:
-        logging.debug("Trying to receive data")
         data, address = self.recvfrom(1024)
         if not data:
             raise ValueError("No data received")
@@ -135,29 +135,43 @@ class Socket(socket.socket):
         return json.dumps(dataclass, default=lambda o: getattr(o, "value", str(o)))
 
     @staticmethod
-    def parse_to_data(raw_data: bytes) -> AbstractData | None:
-        if not raw_data:
+    def parse_to_data(data: bytes) -> AbstractData | None:
+        if not data:
             return None
 
-        try:
-            data_dict = json.loads(raw_data)
-        except json.JSONDecodeError as e:
-            logging.error(f"Failed to parse JSON: {e}")
-            return None
+        data_dict = json.loads(data)
 
         if not data_dict or 'data_type' not in data_dict:
-            logging.warning("Missing 'data_type' field in received data")
             return None
 
-        try:
-            data_type = DataType(data_dict['data_type'])
-        except ValueError as e:
-            logging.error(f"Invalid data_type value: {data_dict['data_type']}")
-            return None
+        data_type = DataType(data_dict['data_type'])
 
         if data_type not in DATA_TYPE_REGISTRY:
-            logging.error(f"Unknown data type: {data_type}")
-            return None
+            raise ValueError(f"Unknown data type: {data_type}")
 
         data_class = DATA_TYPE_REGISTRY[data_type]
-        return parse_json_to_dataclass(raw_data, data_class)
+        data_dict.pop('data_type')
+
+        # Separate init=True and init=False fields
+        init_fields = {}
+        post_init_fields = {}
+
+        for f in dataclasses.fields(data_class):
+            if f.name in data_dict:
+                value = data_dict[f.name]
+                # Convert UUID strings back to UUID objects
+                if f.type == UUID and isinstance(value, str):
+                    value = UUID(value)
+                if f.init:
+                    init_fields[f.name] = value
+                else:
+                    post_init_fields[f.name] = value
+
+        # Create instance with init fields only
+        instance = data_class(**init_fields)
+
+        # Set the init=False fields after creation
+        for name, value in post_init_fields.items():
+            setattr(instance, name, value)
+
+        return instance
