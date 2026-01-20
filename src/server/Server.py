@@ -5,6 +5,7 @@ import socket
 import threading
 import time
 import uuid
+import asyncio
 
 import logging_config
 from AbstractClientOrServer import AbstractClientOrServer
@@ -126,21 +127,28 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
     def is_leader(self) -> bool:
         return self.instance_index == 0  # TODO: implement leader election
 
-    def bully_algo(self):
+    async def bully_algo(self):
         # Bully Algo send vote request to all server with bigger UUID than self
         logging.info("Starting bully algo")
         logging.info("Own Server Id: %s", self.server_id)
         self.electing_new_leader = True
+        if len(self.other_server_list) <= 0:
+            logging.info("Stopping bully algo due to empty server list")
+            return
         for current_server in self.other_server_list:
+            logging.info("Comparing to Server ID: %s", current_server.uuid)
             if current_server.uuid.int > self.server_id.int:
                 logging.info("Compared Server ID is bigger, sending vote request: %s", self.server_id)
                 # Unicast msg to server
                 data: UnicastVoteRequest | None  # to satisfy type checker
                 self.unicast_socket.send_data(UnicastVoteRequest("idk TODO", self.ip, self.port), (current_server.ip, current_server.port))
         # Now wait if anyone with higher id responds
-        # TODO: Is sleep going to "kill" Server?
+        logging.info("Sent all election messages to servers in list, waiting now for possible responses")
+        await asyncio.sleep(1)
+        logging.info("Finished waiting, checking for responses")
+
         if self.electing_new_leader == False:
-            # TODO: Wait for x seconds
+
             return
 
         # No Replies from others, sending won election to all servers in multicast group
@@ -151,7 +159,6 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         while True:
             data, addr = self.middleware.message_queue.get()
             logging.info("Server received message: %s from %s", data, addr)
-            # TODO call method acording to msg
             match data:
                 case BroadcastAnnounceRequest():
                     self.dynamic_discovery(data, addr)
@@ -169,20 +176,27 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                         self.unicast_socket.send_data(BullyAcceptVotingParticipationResponse("idk TODO", self.ip, self.port), (addr[0], addr[1]))
                         self.bully_algo()
 
-
-if __name__ == "__main__":
+async def main():
     logging_config.setup_logging(logging.DEBUG)
     servers = []
     try:
-        for i in range(1):
+        for i in range(2):
             server = Server(instance_index=i)
             server.start()
-            time.sleep(4)
+            #time.sleep(4)
+            await asyncio.sleep(4)
             servers.append(server)
-        for server in servers:
-            server.join()
+        #for server in servers:
+            #logging.info("Joining Servers")
+            #server.join()
+        #time.sleep(4)
+        await asyncio.sleep(2)
+        await servers[0].bully_algo()
     except KeyboardInterrupt:
         logging.info("Shutting down servers")
         for server in servers:
             server.terminate()
             server.join()
+
+if __name__ == "__main__":
+    asyncio.run(main())
