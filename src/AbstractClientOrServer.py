@@ -25,21 +25,16 @@ class AbstractClientOrServer(ABC):
     def setup_multicast_socket(multicast_group, multicast_port):
         sock = Socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        IS_ALL_GROUPS = True
+        if IS_ALL_GROUPS:
+            # on this port, receives ALL multicast groups
+            sock.bind(('', multicast_port))
+        else:
+            # on this port, listen ONLY to MCAST_GRP
+            sock.bind((multicast_group, multicast_port))
+        mreq = struct.pack("4sl", socket.inet_aton(multicast_group), socket.INADDR_ANY)
 
-        # Bind to all interfaces
-        sock.bind(('0.0.0.0', multicast_port))
-
-        # Enable loopback for same-machine testing
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
-
-        # Join multicast group
-        try:
-            mreq = struct.pack('4s4s', socket.inet_aton(multicast_group), socket.inet_aton('0.0.0.0'))
-            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-        except OSError:
-            local_ip = socket.gethostbyname(socket.gethostname())
-            mreq = struct.pack('4s4s', socket.inet_aton(multicast_group), socket.inet_aton(local_ip))
-            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
         return sock
 
