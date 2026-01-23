@@ -1,6 +1,6 @@
 from uuid import UUID
 from dataclasses import dataclass
-from typing import Optional
+from uuid import UUID
 
 from request.AbstractData.AbstractData import AbstractData, register_data_type, DataType
 
@@ -9,6 +9,7 @@ from request.AbstractData.AbstractData import AbstractData, register_data_type, 
 @dataclass
 class AuctionBid(AbstractData):
     uuid: UUID
+    bid_id: UUID  # id for the bid will be send back in response
     auction_id: int
     bid: float
     name: str

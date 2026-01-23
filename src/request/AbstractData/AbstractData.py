@@ -12,6 +12,7 @@ class DataType(Enum):
     MULTICAST_MSG_REQUEST = "MulticastMsgRequest"
     TEST = "TestMulticast"
     AUCTION_BID = "AuctionBid"
+    AUCTION_BID_RESPONSE = "AuctionBidResponse"
     AUCTION_RETRIEVE = "RetrieveAuctions"
     AUCTION_RETRIEVE_RESPONSE = "RetrieveAuctionsResponse"
     AUCTION_SUBSCRIBE = "SubscribeAuction"

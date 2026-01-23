@@ -25,6 +25,7 @@ class Socket(socket.socket):
         try:
             response = Socket.parse_to_data(data)
         except json.decoder.JSONDecodeError:
+            logging.error(f"Could not parse data: {data}")
             return None, address
         if response is None:
             raise ValueError("Failed to parse data")

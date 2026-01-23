@@ -167,7 +167,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                 case SubscribeAuction():
                     pass
                 case AuctionBid():
-                    pass
+                    self.send_socket.send_data(self.auction_manager.handle_bid(data), addr)
                 case PlaceAuctionData():
                     self.auction_manager.add_auction(data)
                 case _:
