@@ -205,10 +205,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                     else:
                         logging.info("** Saving new Leader:" + data.uuid + " **")
                         self.electing_new_leader = False
-                        temp: ServerDataRepresentation
-                        temp.ip = data.ip
-                        temp.port = data.port
-                        temp.uuid = data.uuid
+                        temp = ServerDataRepresentation(data.uuid, data.ip, data.port)
                         self.leader = temp
                 case UnicastVoteRequest(): # Is called by a Server which is performing bully Algo. If their ID is lower, send back a participation message (makes them stop bully for a timeout period)
                     if data.uuid < self.server_id:
