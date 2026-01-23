@@ -1,8 +1,7 @@
 # TODO: Listen for all Messages (uni, multi, broad)
 import logging
 import threading
-from dataclasses import field, dataclass
-from queue import PriorityQueue, Queue
+from queue import Queue
 from uuid import UUID
 
 import select
@@ -10,12 +9,8 @@ import select
 from Socket import Socket
 from request.AbstractData.AbstractData import AbstractData
 from request.AbstractData.AbstractMulticastData import AbstractMulticastData
-
-
-@dataclass(order=True)
-class PrioritizedItem:
-    priority: int
-    item: AbstractMulticastData = field(compare=False)
+from request.AbstractData.MulticastMsgRequest import MulticastMsgRequest
+from server.UniquePriorityQueue import UniquePriorityQueue, PrioritizedItem
 
 
 class MsgMiddleware(threading.Thread):
@@ -41,8 +36,8 @@ class MsgMiddleware(threading.Thread):
         self.current_sequence_number = 0
         self.server_sequence_numbers: dict[UUID, int] = {}
 
-        self.sender_cache: dict[int, tuple[AbstractMulticastData, tuple[str, int]]] = {}
-        self.server_queues: dict[UUID, PriorityQueue] = {}
+        self.sender_cache: dict[int, AbstractMulticastData] = {}
+        self.server_queues: dict[UUID, UniquePriorityQueue] = {}
 
     def run(self):
         logging.info("Starting MsgMiddleware")
@@ -67,18 +62,29 @@ class MsgMiddleware(threading.Thread):
         data.sender_uuid = self.server_id
         data.sequence_number = self.current_sequence_number
         self.current_sequence_number += 1
+        self.sender_cache[data.sequence_number] = data
 
         any_socket = next(iter(self.sockets.keys()))
         any_socket.send_data(data, addr)
 
-    def _handle_broadcast_message(self, data, addr):
-        self.message_queue.put((data, addr))
-        # self.message_handler(data, addr)
-        # check if leader
+    def _send_nack_request(self, nack_request: AbstractMulticastData, addr: tuple[str, int]):
+        nack_request.sender_uuid = self.server_id
+        nack_request.sequence_number = -1  # NACK requests do not need a sequence number
 
-    def _handle_unicast_message(self, data, addr):
+        any_socket = next(iter(self.sockets.keys()))
+        any_socket.send_data(nack_request, addr)
+
+    def _handle_broadcast_message(self, data: AbstractData, addr):
+        self.message_queue.put((data, addr))
+
+    def _handle_unicast_message(self, data: AbstractData, addr):
         # process unicast message
-        pass
+        if isinstance(data, MulticastMsgRequest):
+            self._handle_nack_request(data, addr)
+        elif isinstance(data, AbstractMulticastData):
+            self._handle_multicast_message(data, addr)
+        else:
+            self.message_queue.put((data, addr))
 
     def _handle_multicast_message(self, data: AbstractMulticastData, addr):
         if data.sender_uuid == self.server_id:
@@ -95,19 +101,35 @@ class MsgMiddleware(threading.Thread):
             # check if queued messages can now be delivered
             queue = self.server_queues.get(data.sender_uuid)
             while not queue.empty():
-                item: PrioritizedItem = queue.get()
+                item: PrioritizedItem = queue.peek()
                 if item.priority != expected_seq_num:
-                    queue.put(item)  # noqa
                     break
-                self._deliver_multicast_msg(item.item, addr)
+                self._deliver_multicast_msg(queue.get().item, addr)
                 expected_seq_num += + 1
         # received newer message -> gap in the message arrival
         elif expected_seq_num < data.sequence_number:
-            logging.debug("Queuing out-of-order multicast message with seq num %d from %s", data.sequence_number, data.sender_uuid)
+            logging.warning("Queuing out-of-order multicast message with seq num %d from %s", data.sequence_number, data.sender_uuid)
             queue = self.server_queues.get(data.sender_uuid)
-            queue.put(PrioritizedItem(data.sequence_number, data))  # noqa
+            queue.put(data.sequence_number, data)  # noqa
 
             # request missing messages
+            missing_ids = list(range(expected_seq_num, data.sequence_number))
+            logging.debug("Requesting missing multicast messages with seq nums %s from %s", missing_ids, data.sender_uuid)
+            self._send_nack_request(MulticastMsgRequest(missing_ids, data.sender_uuid), addr)
+
+    def _handle_nack_request(self, data: MulticastMsgRequest, addr: tuple[str, int]):
+        logging.debug("Handling NACK request for missing seq nums %s from %s", data.requested_ids, data.sender_uuid)
+        if data.sender_uuid == self.server_id:
+            return  # ignore own NACK requests
+        elif data.requested_server_id != self.server_id:
+            return  # ignore NACK requests not meant for this server
+
+        for seq_num in data.requested_ids:
+            cached_msg = self.sender_cache.get(seq_num)
+            if cached_msg:
+                logging.debug("Resending missing multicast message with seq num %d to %s", seq_num, addr)
+                any_socket = next(iter(self.sockets.keys()))
+                any_socket.send_data(cached_msg, addr)
 
     def _deliver_multicast_msg(self, data: AbstractMulticastData, addr: tuple[str, int]):
         logging.debug("Delivering multicast message with seq num %d from %s", data.sequence_number, data.sender_uuid)
@@ -115,7 +137,7 @@ class MsgMiddleware(threading.Thread):
         self.server_sequence_numbers[data.sender_uuid] = data.sequence_number
 
     def add_server(self, server_id: UUID):
-        self.server_queues[server_id] = PriorityQueue()
+        self.server_queues[server_id] = UniquePriorityQueue()
         self.server_sequence_numbers[server_id] = -1
 
     def add_socket(self, sock: Socket, message_type: str):
