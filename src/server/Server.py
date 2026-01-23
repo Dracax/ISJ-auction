@@ -13,11 +13,14 @@ from Socket import Socket
 from auction.AuctionManager import AuctionManager
 from auction.AuctionModel import Auction
 from request.AbstractData.AuctionBid import AuctionBid
+from request.AbstractData.AuctionBidResponse import AuctionPlaceResponse
 from request.AbstractData.BroadcastAnnounceRequest import BroadcastAnnounceRequest
 from request.AbstractData.BroadcastAnnounceResponse import BroadcastAnnounceResponse
 from request.AbstractData.MulticastGroupResponse import MulticastGroupResponse
+from request.AbstractData.MulticastNewAction import MulticastNewAction
 from request.AbstractData.PlaceAuctionData import PlaceAuctionData
 from request.AbstractData.RetrieveAuctions import RetrieveAuctions
+from request.AbstractData.ServerPlaceAuction import ServerPlaceAuction
 from request.AbstractData.SubscribeAuction import SubscribeAuction
 from request.AbstractData.UnicastVoteRequest import UnicastVoteRequest
 from server.MsgMiddleware import MsgMiddleware
@@ -28,6 +31,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
     MULTICAST_TEST_PORT = 8011
     IS_PRODUCTION = os.environ.get('PRODUCTION', 'true') == 'true'
     UNICAST_PORT = 0 if IS_PRODUCTION else 9001
+    TEST_LEADER = os.environ.get('LEADER', 'false') == 'true'
 
     SERVER_BROADCAST_PORT = 8000
 
@@ -47,6 +51,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         self.host = socket.gethostname()
         self.ip = socket.gethostbyname(self.host)
         self.multicast_port: int = None
+        self.multicast_address: tuple[str, int] = None
 
         # middleware
         self.middleware: MsgMiddleware = None
@@ -55,6 +60,8 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         logging.debug(self.server_id)
         self.server_list: list[tuple[str, int]] = []
         self.other_server_list: list[ServerDataRepresentation] = []
+
+        self.auction_server_map: dict[int, ServerDataRepresentation] = {}
 
         # dict of auctions
         self.auctions: dict[int, Auction] = {}
@@ -117,7 +124,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         message = BroadcastAnnounceRequest(self.host, self.ip, self.port, self.server_id, True)
 
         data: MulticastGroupResponse | None  # to satisfy type checker
-        data = broadcast_socket.send_and_receive_data(message, (ip, port), MulticastGroupResponse, timeout=1,
+        data = broadcast_socket.send_and_receive_data(message, (ip, port), MulticastGroupResponse, timeout=0.2,
                                                       retries=2)
 
         if data:
@@ -163,15 +170,50 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                 case BroadcastAnnounceRequest():
                     self.dynamic_discovery(data, addr)
                 case RetrieveAuctions():
-                    self.send_socket.send_data(self.auction_manager.get_all_auctions(), addr)
+                    if self.is_leader():
+                        self.send_socket.send_data(self.auction_manager.get_all_auctions(), addr)
                 case SubscribeAuction():
                     pass
                 case AuctionBid():
                     self.send_socket.send_data(self.auction_manager.handle_bid(data), addr)
                 case PlaceAuctionData():
+                    self.place_auction(data)
+                case ServerPlaceAuction():
+                    if data.processing_server_id != self.server_id:
+                        logging.error("Wrong server received msg", exc_info=True)
+                        continue
                     self.auction_manager.add_auction(data)
+                    self.send_socket.send_data(AuctionPlaceResponse(True, 2, "sdfgsdfrgdfg"), data.client_address)
+                    self.middleware.send_multicast(
+                        MulticastNewAction(data.auction_id, data.processing_server_id,
+                                           data.title, data.starting_bid,
+                                           data.auction_owner, data.owner_id,
+                                           processing_server_ip=self.ip, processing_server_port=self.port),
+                        (self.MULTICAST_GROUP, self.multicast_port))
+                case MulticastNewAction():
+                    self.auction_manager.add_auction(data)
+                    self.auction_server_map[data.auction_id] = ServerDataRepresentation(data.processing_server_id,
+                                                                                        data.processing_server_ip,
+                                                                                        data.processing_server_port)
                 case _:
                     pass
+
+    def place_auction(self, auction: PlaceAuctionData):
+        auction_servers = set(self.auction_server_map.values())
+        auction_id = self.auction_manager.get_next_auction_id()
+        for server in self.other_server_list:
+            if server.uuid != self.server_id and server not in auction_servers:
+                self.auction_server_map[auction_id] = server
+                break
+        else:
+            self.auction_server_map[auction_id] = ServerDataRepresentation(self.server_id, self.ip, self.port)
+
+        responsible_server = self.auction_server_map[auction_id]
+        self.send_socket.send_data(ServerPlaceAuction(auction_id,
+                                                      responsible_server.uuid, auction.title,
+                                                      auction.starting_bid, auction.auction_owner, auction.owner_id,
+                                                      auction.request_address),
+                                   (responsible_server.ip, responsible_server.port))
 
 
 if __name__ == "__main__":

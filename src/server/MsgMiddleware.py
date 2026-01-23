@@ -1,4 +1,3 @@
-# TODO: Listen for all Messages (uni, multi, broad)
 import logging
 import threading
 from queue import Queue
@@ -160,14 +159,3 @@ class MsgMiddleware(threading.Thread):
             if sock in self.sockets:
                 del self.sockets[sock]
                 logging.info("Socket entfernt:")
-
-    def listen_for_message(self, data):
-        pass
-        # start as thread
-        # All on the same port, but individual sockets
-        # socket uni listen_socket.receive_data()
-        # socket multi listen_socket.receive_data()
-        # socket broad listen_socket.receive_data()
-        # check Data for correctness etc etc
-
-        # myServer.receive_message(data.abstractDataMessage)

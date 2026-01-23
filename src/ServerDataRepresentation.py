@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 
-@dataclass
+@dataclass(frozen=True)
 class ServerDataRepresentation:
     uuid: UUID
     ip: str

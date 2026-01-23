@@ -15,7 +15,7 @@ class Socket(socket.socket):
         if not dataclasses.is_dataclass(data):
             raise TypeError("data must be a dataclass instance")
         logging.debug(f"Sending {data} to {address}")
-        self.sendto(str.encode(self.to_json(data)), address)
+        self.sendto(str.encode(self.to_json(data)), tuple(address))
 
     def receive_data(self) -> tuple[AbstractData, tuple[str, int]]:
         data, address = self.recvfrom(1024)
