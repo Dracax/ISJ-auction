@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from AbstractData import register_data_type, DataType
+from request.AbstractData.AbstractData import register_data_type, DataType
 from request.AbstractRequest import AbstractRequest
 
 
