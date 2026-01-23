@@ -150,7 +150,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         self.middleware.add_socket(self.multicast_socket, 'multicast')
 
     def is_leader(self) -> bool:
-        return self.instance_index == 0  # TODO: implement leader election
+        return self.leader is not None and self.leader.uuid == self.server_id
 
     def bully_algo(self):
         # Bully Algo send vote request to all server with bigger UUID than self
@@ -167,8 +167,8 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                 logging.info("** Compared Server ID is bigger, sending vote request: %s **", self.server_id)
                 # Unicast msg to server
                 data: UnicastVoteRequest | None  # to satisfy type checker
-                self.unicast_socket.send_data(UnicastVoteRequest("sadfsad", self.ip, self.port),
-                                              (current_server.ip, current_server.port)) # TODO
+                self.send_socket.send_data(UnicastVoteRequest("sadfsad", self.server_id, self.ip, self.port),
+                                           (current_server.ip, current_server.port))  # TODO
         # Now wait if anyone with higher id responds
         logging.info("** Sent all election messages to servers in list, waiting now for possible responses **")
         response_received = self.response_participation_event.wait(timeout=2.0)
