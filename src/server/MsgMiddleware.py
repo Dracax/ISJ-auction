@@ -92,6 +92,7 @@ class MsgMiddleware(threading.Thread):
     def _handle_multicast_message(self, data: AbstractMulticastData, addr):
         if data.sender_uuid == self.server_id:
             return  # ignore own messages
+        self._handle_new_server(data)
         expected_seq_num = self.server_sequence_numbers.get(data.sender_uuid, -1) + 1
         print("expected: ", expected_seq_num)
         # received old message
@@ -104,8 +105,6 @@ class MsgMiddleware(threading.Thread):
             self._deliver_multicast_msg(data, addr)
             expected_seq_num += + 1
             # check if queued messages can now be delivered
-            if data.sender_uuid not in self.server_queues:
-                self.add_server(data.sender_uuid)
             queue = self.server_queues.get(data.sender_uuid)
             while not queue.empty():
                 item: PrioritizedItem = queue.peek()
@@ -117,8 +116,6 @@ class MsgMiddleware(threading.Thread):
         elif expected_seq_num < data.sequence_number:
             logging.warning("Queuing out-of-order multicast message with seq num %d from %s", data.sequence_number,
                             data.sender_uuid)
-            if data.sender_uuid not in self.server_queues:
-                self.add_server(data.sender_uuid)
             queue = self.server_queues.get(data.sender_uuid)
             queue.put(data.sequence_number, data)  # noqa
 
@@ -147,9 +144,13 @@ class MsgMiddleware(threading.Thread):
         self.message_queue.put((data, addr))
         self.server_sequence_numbers[data.sender_uuid] = data.sequence_number
 
-    def add_server(self, server_id: UUID):
+    def _handle_new_server(self, data: AbstractMulticastData):
+        if data.sender_uuid not in self.server_queues:
+            self.add_server(data.sender_uuid, data.sequence_number - 1)
+
+    def add_server(self, server_id: UUID, sequence_number: int = -1):
         self.server_queues[server_id] = UniquePriorityQueue()
-        self.server_sequence_numbers[server_id] = -1
+        self.server_sequence_numbers[server_id] = sequence_number
 
     def add_socket(self, sock: Socket, message_type: str):
         """Fügt einen Socket dynamisch hinzu."""
