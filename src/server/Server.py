@@ -30,7 +30,7 @@ from multiprocessing import Event
 
 
 class Server(multiprocessing.Process, AbstractClientOrServer):
-    MULTICAST_GROUP = '224.0.0.1'
+    MULTICAST_GROUP = '224.1.1.1'
     MULTICAST_TEST_PORT = 8011
     IS_PRODUCTION = os.environ.get('PRODUCTION', 'true') == 'true'
     UNICAST_PORT = 0 if IS_PRODUCTION else 9001
@@ -115,19 +115,21 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         if data.ip == self.ip and data.port == self.port:
             return
         if self.is_leader() and not data.is_server:
-            self.send_socket.send_data(BroadcastAnnounceResponse(self.server_list, self.address), addr)
+            self.send_socket.send_data(BroadcastAnnounceResponse(self.server_list, self.address), (data.ip, data.port))
         elif self.multicast_socket and data.is_server:
             logging.info("New server joining: %s", data)
             self.middleware.add_server(data.uuid)
             self.other_server_list.append(ServerDataRepresentation(data.uuid, data.ip, data.port))
-            self.send_socket.send_data(MulticastGroupResponse(self.MULTICAST_GROUP, self.multicast_port), addr)
+            self.send_socket.send_data(MulticastGroupResponse(self.MULTICAST_GROUP, self.multicast_port), (data.ip, data.port))
             self.bully_algo()
 
     def dynamic_discovery_server_broadcast(self, ip, port=37020):
         logging.debug("Starting broadcast sender")
 
         broadcast_socket = self.create_broadcast_socket()
-        message = BroadcastAnnounceRequest(self.host, self.ip, self.port, self.server_id, True)
+        broadcast_socket.bind((self.ip, 0))
+
+        message = BroadcastAnnounceRequest(self.host, broadcast_socket.getsockname()[0], broadcast_socket.getsockname()[1], self.server_id, True)
 
         data: MulticastGroupResponse | None  # to satisfy type checker
         data = broadcast_socket.send_and_receive_data(message, (ip, port), MulticastGroupResponse, timeout=1,
