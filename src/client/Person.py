@@ -1,4 +1,4 @@
-from src.client.Inventory import Inventory
+from client.Inventory import Inventory
 
 
 class Person:

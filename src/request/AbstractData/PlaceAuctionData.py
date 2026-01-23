@@ -8,7 +8,6 @@ from request.AbstractData.AbstractData import register_data_type, DataType, Abst
 @dataclass
 class PlaceAuctionData(AbstractData):
     title: str
-    description: str
     starting_bid: float
     auction_owner: str
     owner_id: UUID

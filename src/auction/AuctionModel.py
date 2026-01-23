@@ -10,13 +10,6 @@ class Auction:
     current_bidder: Optional[str] #Adress of Bidder, UIID of Bidder?
     client_owner: str #Right data format?
 
-    def auction_to_json(auction: Auction) -> str:
-        return json.dumps(asdict(auction))
-    
-    def json_to_auction(json_string: str) -> Auction:
-        data = json.loads(json_string)
-        return Auction(**data)
-
     
 
 
