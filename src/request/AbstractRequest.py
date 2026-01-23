@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from AbstractData import AbstractData
+from request.AbstractData.AbstractData import AbstractData
 
 
 @dataclass
