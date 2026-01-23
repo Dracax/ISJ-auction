@@ -9,12 +9,12 @@ import asyncio
 
 import logging_config
 from AbstractClientOrServer import AbstractClientOrServer
-from request.AbstractData import BullyElectedLeaderRequest
 from request.AbstractData.BroadcastAnnounceRequest import BroadcastAnnounceRequest
 from request.AbstractData.BroadcastAnnounceResponse import BroadcastAnnounceResponse
 from ServerDataRepresentation import ServerDataRepresentation
 from Socket import Socket
 from request.AbstractData.BullyAcceptVotingParticipationResponse import BullyAcceptVotingParticipationResponse
+from request.AbstractData.BullyElectedLeaderRequest import BullyElectedLeaderRequest
 from request.AbstractData.MulticastGroupResponse import MulticastGroupResponse
 from request.AbstractData.UnicastVoteRequest import UnicastVoteRequest
 from server.MsgMiddleware import MsgMiddleware
@@ -100,6 +100,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             self.middleware.add_server(data.uuid)
             self.other_server_list.append(ServerDataRepresentation(data.uuid, data.ip, data.port))
             self.unicast_socket.send_data(MulticastGroupResponse(self.MULTICAST_GROUP, self.multicast_port), addr)
+            self.bully_algo()
 
     def dynamic_discovery_server_broadcast(self, ip, port=37020):
         logging.debug("Starting broadcast sender")
@@ -127,7 +128,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
     def is_leader(self) -> bool:
         return self.instance_index == 0  # TODO: implement leader election
 
-    async def bully_algo(self):
+    def bully_algo(self):
         # Bully Algo send vote request to all server with bigger UUID than self
         logging.info("Starting bully algo")
         logging.info("Own Server Id: %s", self.server_id)
@@ -141,10 +142,10 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                 logging.info("Compared Server ID is bigger, sending vote request: %s", self.server_id)
                 # Unicast msg to server
                 data: UnicastVoteRequest | None  # to satisfy type checker
-                self.unicast_socket.send_data(UnicastVoteRequest("idk TODO", self.ip, self.port), (current_server.ip, current_server.port))
+                self.unicast_socket.send_data(UnicastVoteRequest("idk TODO", self.server_id, self.ip, self.port), (current_server.ip, current_server.port))
         # Now wait if anyone with higher id responds
         logging.info("Sent all election messages to servers in list, waiting now for possible responses")
-        await asyncio.sleep(1)
+        #await asyncio.sleep(1)
         logging.info("Finished waiting, checking for responses")
 
         if self.electing_new_leader == False:
@@ -173,7 +174,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                         self.leader = temp
                 case UnicastVoteRequest():
                     if data.uuid < self.server_id:
-                        self.unicast_socket.send_data(BullyAcceptVotingParticipationResponse("idk TODO", self.ip, self.port), (addr[0], addr[1]))
+                        self.unicast_socket.send_data(BullyAcceptVotingParticipationResponse("idk TODO", self.server_id, self.ip, self.port), (addr[0], addr[1]))
                         self.bully_algo()
 
 async def main():
@@ -191,7 +192,6 @@ async def main():
             #server.join()
         #time.sleep(4)
         await asyncio.sleep(2)
-        await servers[0].bully_algo()
     except KeyboardInterrupt:
         logging.info("Shutting down servers")
         for server in servers:

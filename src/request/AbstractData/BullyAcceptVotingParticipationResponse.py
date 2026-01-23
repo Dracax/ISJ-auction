@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from uuid import UUID
 
 from request.AbstractData.AbstractData import AbstractData, register_data_type, DataType
 
@@ -6,6 +7,6 @@ from request.AbstractData.AbstractData import AbstractData, register_data_type, 
 @dataclass
 class BullyAcceptVotingParticipationResponse(AbstractData):
     host: str
-    uuid: str
+    uuid: UUID
     ip: str
     port: int
