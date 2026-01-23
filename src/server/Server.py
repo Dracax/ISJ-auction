@@ -5,25 +5,29 @@ import socket
 import threading
 import time
 import uuid
-import json
 
 import logging_config
 from AbstractClientOrServer import AbstractClientOrServer
 from ServerDataRepresentation import ServerDataRepresentation
 from Socket import Socket
+from auction.AuctionManager import AuctionManager
+from auction.AuctionModel import Auction
+from request.AbstractData.AuctionBid import AuctionBid
 from request.AbstractData.BroadcastAnnounceRequest import BroadcastAnnounceRequest
 from request.AbstractData.BroadcastAnnounceResponse import BroadcastAnnounceResponse
 from request.AbstractData.MulticastGroupResponse import MulticastGroupResponse
+from request.AbstractData.PlaceAuctionData import PlaceAuctionData
+from request.AbstractData.RetrieveAuctions import RetrieveAuctions
+from request.AbstractData.SubscribeAuction import SubscribeAuction
 from request.AbstractData.UnicastVoteRequest import UnicastVoteRequest
 from server.MsgMiddleware import MsgMiddleware
-from auction.AuctionModel import Auction
-from auction.AuctionManager import AuctionManager
 
 
 class Server(multiprocessing.Process, AbstractClientOrServer):
     MULTICAST_GROUP = '224.0.0.1'
     MULTICAST_TEST_PORT = 8011
     IS_PRODUCTION = os.environ.get('PRODUCTION', 'true') == 'true'
+    UNICAST_PORT = 0 if IS_PRODUCTION else 9001
 
     SERVER_BROADCAST_PORT = 8000
 
@@ -65,7 +69,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
         # unicast socket
         self.unicast_socket: Socket = self.create_unicast_socket()
-        self.unicast_socket.bind((self.ip, 0))
+        self.unicast_socket.bind((self.ip, self.UNICAST_PORT))
         self.port = self.unicast_socket.getsockname()[1]
         self.address = (self.ip, self.port)
         self.other_server_list.append(ServerDataRepresentation(self.server_id, self.ip, self.port))
@@ -90,16 +94,10 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
         self.middleware.start()
 
-        self.auction_manager = AuctionManager(
-            middleware=self.middleware,
-            broadcast_addr=(self.MULTICAST_GROUP, self.multicast_port)
-        )
-
+        self.auction_manager = AuctionManager()
 
         self.receive_message()
         self.middleware.join()
-
-
 
     def dynamic_discovery(self, data: BroadcastAnnounceRequest, addr: tuple[str, int]):
         if data.ip == self.ip and data.port == self.port:
@@ -128,7 +126,8 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             self.multicast_port = data.group_port
         else:
             logging.info("No broadcast response received, creating new multicast group")
-            self.multicast_socket = self.setup_multicast_socket(self.MULTICAST_GROUP, self.MULTICAST_TEST_PORT if not self.IS_PRODUCTION else 0)
+            self.multicast_socket = self.setup_multicast_socket(self.MULTICAST_GROUP,
+                                                                self.MULTICAST_TEST_PORT if not self.IS_PRODUCTION else 0)
             self.multicast_port = self.multicast_socket.getsockname()[1]
             logging.info("Created multicast group at %s:%d", self.MULTICAST_GROUP, self.multicast_port)
 
@@ -147,7 +146,8 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                 logging.info("Compared Server ID is bigger, sending vote request: %s", self.server_id)
                 # Unicast msg to server
                 data: UnicastVoteRequest | None  # to satisfy type checker
-                self.unicast_socket.send_data(UnicastVoteRequest("sadfsad", self.ip, self.port), (current_server.ip, current_server.port))
+                self.unicast_socket.send_data(UnicastVoteRequest("sadfsad", self.ip, self.port),
+                                              (current_server.ip, current_server.port))
         # Now wait if anyone with higher id responds
 
         # No Replies from others, sending won election to all servers in multicast group
@@ -162,6 +162,16 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             match data:
                 case BroadcastAnnounceRequest():
                     self.dynamic_discovery(data, addr)
+                case RetrieveAuctions():
+                    self.send_socket.send_data(self.auction_manager.get_all_auctions(), addr)
+                case SubscribeAuction():
+                    pass
+                case AuctionBid():
+                    pass
+                case PlaceAuctionData():
+                    self.auction_manager.add_auction(data)
+                case _:
+                    pass
 
 
 if __name__ == "__main__":

@@ -11,6 +11,11 @@ class DataType(Enum):
     BULLY_ELECTED_LEADER = "BullyElectedLeader"
     MULTICAST_MSG_REQUEST = "MulticastMsgRequest"
     TEST = "TestMulticast"
+    AUCTION_BID = "AuctionBid"
+    AUCTION_RETRIEVE = "RetrieveAuctions"
+    AUCTION_RETRIEVE_RESPONSE = "RetrieveAuctionsResponse"
+    AUCTION_SUBSCRIBE = "SubscribeAuction"
+    ACUTION_PLACE = "PlaceAuction"
 
 
 @dataclass
