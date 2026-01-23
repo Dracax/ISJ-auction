@@ -1,6 +1,6 @@
 import logging
 
-from uuid import UUID
+import uuid
 from request.AbstractData.AuctionData import AuctionData
 from client.Client import Client
 from request.AuctionRetrieveRequest import AuctionRetrieveRequest
@@ -8,6 +8,8 @@ from request.AbstractData.RetrieveAuctions import RetrieveAuctions
 from request.AbstractData.AuctionBid import AuctionBid
 from request.AbstractData.PlaceAuctionData import PlaceAuctionData
 from request.AbstractData.SubscribeAuction import SubscribeAuction
+from request.AbstractData.AuctionBidResponse import AuctionBidResponse
+from request.AbstractData.RetrieveAuctionsResponse import RetrieveAuctionsResponse
 
 class AuctionServer:
     """
@@ -27,7 +29,12 @@ class AuctionServer:
         """
         request = RetrieveAuctions(self.client.client_id)
 
-        self.client.send_socket.send_data(request, self.client.server_to_talk_to)
+        self.client.client_socket.send_data(request, self.client.server_to_talk_to)
+        msg = self.client.receive_only(timeout=20)
+        if msg:
+            print("Got:", msg)
+        else:
+            print("Nothing received")
 
 
     def place_auction(self, title: str, starting_price: float, name: str):
@@ -43,7 +50,12 @@ class AuctionServer:
         :type name: str
         """
         new_auction = PlaceAuctionData(title, starting_price, name, self.client.client_id)
-        self.client.send_socket.send_data(new_auction, self.client.server_to_talk_to)
+        self.client.client_socket.send_data(new_auction, self.client.server_to_talk_to)
+        msg = self.client.receive_only(timeout=20)
+        if msg:
+            print("Got:", msg)
+        else:
+            print("Nothing received")
         
 
     def send_bid(self, auction_id: int, amount : float, name: str):
@@ -52,10 +64,28 @@ class AuctionServer:
         
         :param self: auction_id: int, bid: float
         """
-        bid = AuctionBid(self.client.client_id, auction_id, amount, name)
-        self.client.send_socket.send_data(bid, self.client.server_to_talk_to)
+        bid_uuid = uuid.uuid4()
+        bid = AuctionBid(self.client.client_id, bid_uuid, auction_id, amount, name)
+        self.client.client_socket.send_data(bid, self.client.server_to_talk_to)
         logging.debug("Send Bid")
+        msg = self.client.receive_only(timeout=20)
+        if msg:
+            self.handle_messages(msg)
+        else:
+            print("Nothing received")
     
     def subscribe_2_auction(self, auction_id: int):
         sub = SubscribeAuction(auction_id, self.client.client_id)
-        self.client.send_socket.send_data(sub, self.client.server_to_talk_to)
+        self.client.client_socket.send_data(sub, self.client.server_to_talk_to)
+    #Where do we place receive function?
+    def handle_messages(self, response):
+        if isinstance(response, AuctionBidResponse):
+            if response.success:
+                print(response.message)
+            else:
+                print(f"Bid {response.bid_id} rejected: {response.message}")
+        if isinstance(response, RetrieveAuctionsResponse):
+            print(response.auctions)
+        else:
+            print('Implement this.')
+

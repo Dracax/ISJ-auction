@@ -15,8 +15,9 @@ from request.AbstractRequest import AbstractRequest
 class Client(threading.Thread, AbstractClientOrServer):
     def __init__(self):
         super(Client, self).__init__()
-
+        
         self.client_socket: Socket | None = None
+        #Socket not used for sending/ listening.
         self.send_socket: Socket = None
     
 
@@ -29,7 +30,7 @@ class Client(threading.Thread, AbstractClientOrServer):
         self.client_id = uuid.uuid4()
 
     def run(self):
-        logging_config.setup_logging(logging.ERROR)
+        logging_config.setup_logging(logging.INFO)
         # logging.info("Starting client process with PID %d", self.pid)
         self.client_socket = Socket()
         self.client_socket.bind((self.ip, 0))
@@ -118,10 +119,32 @@ class Client(threading.Thread, AbstractClientOrServer):
             return data_received
 
         return None
+    def receive_only(self, timeout: float | None = None):
+        """
+        Blocks until data is received on the client socket.
+        Returns the deserialized object or None on timeout.
+        """
+        if not self.client_socket:
+            logging.error("Client socket not initialized")
+            return None
+
+        if timeout is not None:
+            self.client_socket.settimeout(timeout)
+
+        try:
+            data, addr = self.client_socket.receive_data()
+            logging.info("Received data from %s: %s", addr, data)
+            return data
+        except socket.timeout:
+            logging.warning("Receive timed out")
+            return None
+        except Exception as e:
+            logging.error("Error while receiving data: %s", e)
+        return None
 
 
 if __name__ == "__main__":
-    logging_config.setup_logging(logging.DEBUG)
+    logging_config.setup_logging(logging.INFO)
     client = Client()
     client.start()
     client.join()
