@@ -9,6 +9,11 @@ import asyncio
 
 import logging_config
 from AbstractClientOrServer import AbstractClientOrServer
+from ServerDataRepresentation import ServerDataRepresentation
+from Socket import Socket
+from auction.AuctionManager import AuctionManager
+from auction.AuctionModel import Auction
+from request.AbstractData.AuctionBid import AuctionBid
 from request.AbstractData.BroadcastAnnounceRequest import BroadcastAnnounceRequest
 from request.AbstractData.BroadcastAnnounceResponse import BroadcastAnnounceResponse
 from ServerDataRepresentation import ServerDataRepresentation
@@ -16,6 +21,9 @@ from Socket import Socket
 from request.AbstractData.BullyAcceptVotingParticipationResponse import BullyAcceptVotingParticipationResponse
 from request.AbstractData.BullyElectedLeaderRequest import BullyElectedLeaderRequest
 from request.AbstractData.MulticastGroupResponse import MulticastGroupResponse
+from request.AbstractData.PlaceAuctionData import PlaceAuctionData
+from request.AbstractData.RetrieveAuctions import RetrieveAuctions
+from request.AbstractData.SubscribeAuction import SubscribeAuction
 from request.AbstractData.UnicastVoteRequest import UnicastVoteRequest
 from server.MsgMiddleware import MsgMiddleware
 from multiprocessing import Event
@@ -25,6 +33,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
     MULTICAST_GROUP = '224.0.0.1'
     MULTICAST_TEST_PORT = 8011
     IS_PRODUCTION = os.environ.get('PRODUCTION', 'true') == 'true'
+    UNICAST_PORT = 0 if IS_PRODUCTION else 9001
 
     SERVER_BROADCAST_PORT = 8000
 
@@ -59,6 +68,9 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         self.response_participation_event = Event()
         self.response_election_event = Event()
 
+        # dict of auctions
+        self.auctions: dict[int, Auction] = {}
+
     def run(self):
         # Configure logging for this process
         logging_config.setup_logging(logging.DEBUG)
@@ -69,7 +81,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
         # unicast socket
         self.unicast_socket: Socket = self.create_unicast_socket()
-        self.unicast_socket.bind((self.ip, 0))
+        self.unicast_socket.bind((self.ip, self.UNICAST_PORT))
         self.port = self.unicast_socket.getsockname()[1]
         self.address = (self.ip, self.port)
         self.other_server_list.append(ServerDataRepresentation(self.server_id, self.ip, self.port))
@@ -94,8 +106,8 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
         self.middleware.start()
 
-        #logging.debug("** Starting thread for messages **")
-        #threading.Thread(target=self.receive_message, daemon=True).start()
+        self.auction_manager = AuctionManager()
+
         self.receive_message()
         self.middleware.join()
 
@@ -127,7 +139,8 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             self.multicast_port = data.group_port
         else:
             logging.info("No broadcast response received, creating new multicast group")
-            self.multicast_socket = self.setup_multicast_socket(self.MULTICAST_GROUP, self.MULTICAST_TEST_PORT if not self.IS_PRODUCTION else 0)
+            self.multicast_socket = self.setup_multicast_socket(self.MULTICAST_GROUP,
+                                                                self.MULTICAST_TEST_PORT if not self.IS_PRODUCTION else 0)
             self.multicast_port = self.multicast_socket.getsockname()[1]
             logging.info("Created multicast group at %s:%d", self.MULTICAST_GROUP, self.multicast_port)
 
@@ -152,7 +165,8 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                 logging.info("** Compared Server ID is bigger, sending vote request: %s **", self.server_id)
                 # Unicast msg to server
                 data: UnicastVoteRequest | None  # to satisfy type checker
-                self.unicast_socket.send_data(UnicastVoteRequest("idk TODO", self.server_id, self.ip, self.port), (current_server.ip, current_server.port))
+                self.unicast_socket.send_data(UnicastVoteRequest("sadfsad", self.ip, self.port),
+                                              (current_server.ip, current_server.port)) # TODO
         # Now wait if anyone with higher id responds
         logging.info("** Sent all election messages to servers in list, waiting now for possible responses **")
         response_received = self.response_participation_event.wait(timeout=2.0)
@@ -204,6 +218,16 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                     self.electing_new_leader = False
                     logging.info("** Setting ok event participation to true **")
                     self.response_participation_event.set()
+                case RetrieveAuctions():
+                    self.send_socket.send_data(self.auction_manager.get_all_auctions(), addr)
+                case SubscribeAuction():
+                    pass
+                case AuctionBid():
+                    self.send_socket.send_data(self.auction_manager.handle_bid(data), addr)
+                case PlaceAuctionData():
+                    self.auction_manager.add_auction(data)
+                case _:
+                    pass
 
 async def main():
     logging_config.setup_logging(logging.DEBUG)

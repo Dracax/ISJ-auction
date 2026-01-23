@@ -17,6 +17,8 @@ class Client(threading.Thread, AbstractClientOrServer):
         super(Client, self).__init__()
 
         self.client_socket: Socket | None = None
+        self.send_socket: Socket = None
+    
 
         self.host = socket.gethostname()
         self.ip = socket.gethostbyname(self.host)
@@ -24,13 +26,17 @@ class Client(threading.Thread, AbstractClientOrServer):
         self.server_list: list[tuple[str, int]] = []
         self.server_to_talk_to: tuple[str, int] | None = None
 
+        self.client_id = uuid.uuid4()
+
     def run(self):
-        logging_config.setup_logging(logging.DEBUG)
+        logging_config.setup_logging(logging.ERROR)
         # logging.info("Starting client process with PID %d", self.pid)
         self.client_socket = Socket()
         self.client_socket.bind((self.ip, 0))
 
         self.client_socket.settimeout(5)  # For testing very high timeout
+
+        self.send_socket = Socket()
 
         self.port = self.client_socket.getsockname()[1]
         self.address = (self.ip, self.port)
@@ -49,7 +55,7 @@ class Client(threading.Thread, AbstractClientOrServer):
         broadcast_socket = self.create_broadcast_socket()
 
         message = BroadcastAnnounceRequest(self.host, self.ip, self.port,
-                                           uuid.uuid4())  # TODO: generate uuid do we need it?
+                                           self.client_id)  # TODO: generate uuid do we need it?
 
         data = broadcast_socket.send_and_receive_data(message, (ip, port), BroadcastAnnounceResponse, timeout=5, retries=10)
 
