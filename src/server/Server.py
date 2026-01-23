@@ -38,6 +38,8 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         # will be set after dynamic discovery
         self.multicast_socket: Socket | None = None
 
+        self.send_socket: Socket = None
+
         self.host = socket.gethostname()
         self.ip = socket.gethostbyname(self.host)
         self.multicast_port: int = None
@@ -77,6 +79,8 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
         threading.Thread(target=self.dynamic_discovery_server_broadcast,
                          args=(self.get_broadcast_address(), self.SERVER_BROADCAST_PORT), daemon=True).start()
+
+        self.send_socket = Socket()
 
         self.middleware = MsgMiddleware(self.server_id, {
             self.unicast_socket: 'unicast',
