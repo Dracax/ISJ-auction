@@ -5,6 +5,7 @@ import socket
 import threading
 import time
 import uuid
+import json
 
 import logging_config
 from AbstractClientOrServer import AbstractClientOrServer
@@ -15,6 +16,8 @@ from request.AbstractData.BroadcastAnnounceResponse import BroadcastAnnounceResp
 from request.AbstractData.MulticastGroupResponse import MulticastGroupResponse
 from request.AbstractData.UnicastVoteRequest import UnicastVoteRequest
 from server.MsgMiddleware import MsgMiddleware
+from auction.AuctionModel import Auction
+from auction.AuctionManager import AuctionManager
 
 
 class Server(multiprocessing.Process, AbstractClientOrServer):
@@ -46,6 +49,9 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         logging.debug(self.server_id)
         self.server_list: list[tuple[str, int]] = []
         self.other_server_list: list[ServerDataRepresentation] = []
+
+        # dict of auctions
+        self.auctions: dict[int, Auction] = {}
 
     def run(self):
         # Configure logging for this process
@@ -80,8 +86,16 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
         self.middleware.start()
 
+        self.auction_manager = AuctionManager(
+            middleware=self.middleware,
+            broadcast_addr=(self.MULTICAST_GROUP, self.multicast_port)
+        )
+
+
         self.receive_message()
         self.middleware.join()
+
+
 
     def dynamic_discovery(self, data: BroadcastAnnounceRequest, addr: tuple[str, int]):
         if data.ip == self.ip and data.port == self.port:
