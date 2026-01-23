@@ -49,7 +49,7 @@ class AuctionServer:
         :param name: Description
         :type name: str
         """
-        new_auction = PlaceAuctionData(title, starting_price, name, self.client.client_id)
+        new_auction = PlaceAuctionData(self.client.address, title, starting_price, name, self.client.client_id)
         self.client.client_socket.send_data(new_auction, self.client.server_to_talk_to)
         msg = self.client.receive_only(timeout=20)
         if msg:
@@ -65,7 +65,7 @@ class AuctionServer:
         :param self: auction_id: int, bid: float
         """
         bid_uuid = uuid.uuid4()
-        bid = AuctionBid(self.client.client_id, bid_uuid, auction_id, amount, name)
+        bid = AuctionBid(self.client.address, self.client.client_id, bid_uuid, auction_id, amount, name)
         self.client.client_socket.send_data(bid, self.client.server_to_talk_to)
         logging.debug("Send Bid")
         msg = self.client.receive_only(timeout=20)

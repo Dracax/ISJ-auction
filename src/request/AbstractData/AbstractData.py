@@ -17,6 +17,9 @@ class DataType(Enum):
     AUCTION_RETRIEVE_RESPONSE = "RetrieveAuctionsResponse"
     AUCTION_SUBSCRIBE = "SubscribeAuction"
     ACUTION_PLACE = "PlaceAuction"
+    SERVER_ACUTION_PLACE = "ServerPlaceAuction"
+    MULTICAST_NEW_AUCTION = "MulticastNewAuction"
+    AUCTION_PLACE_RESPONSE = "PlaceAuctionResponse"
 
 
 @dataclass
