@@ -5,6 +5,7 @@ import socket
 import threading
 import time
 import uuid
+import asyncio
 
 import logging_config
 from AbstractClientOrServer import AbstractClientOrServer
@@ -16,6 +17,10 @@ from request.AbstractData.AuctionBid import AuctionBid
 from request.AbstractData.AuctionBidResponse import AuctionPlaceResponse
 from request.AbstractData.BroadcastAnnounceRequest import BroadcastAnnounceRequest
 from request.AbstractData.BroadcastAnnounceResponse import BroadcastAnnounceResponse
+from ServerDataRepresentation import ServerDataRepresentation
+from Socket import Socket
+from request.AbstractData.BullyAcceptVotingParticipationResponse import BullyAcceptVotingParticipationResponse
+from request.AbstractData.BullyElectedLeaderRequest import BullyElectedLeaderRequest
 from request.AbstractData.MulticastGroupResponse import MulticastGroupResponse
 from request.AbstractData.MulticastNewAction import MulticastNewAction
 from request.AbstractData.PlaceAuctionData import PlaceAuctionData
@@ -24,10 +29,11 @@ from request.AbstractData.ServerPlaceAuction import ServerPlaceAuction
 from request.AbstractData.SubscribeAuction import SubscribeAuction
 from request.AbstractData.UnicastVoteRequest import UnicastVoteRequest
 from server.MsgMiddleware import MsgMiddleware
+from multiprocessing import Event
 
 
 class Server(multiprocessing.Process, AbstractClientOrServer):
-    MULTICAST_GROUP = '224.0.0.1'
+    MULTICAST_GROUP = '224.1.1.1'
     MULTICAST_TEST_PORT = 8011
     IS_PRODUCTION = os.environ.get('PRODUCTION', 'true') == 'true'
     UNICAST_PORT = 0 if IS_PRODUCTION else 9001
@@ -60,6 +66,11 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         logging.debug(self.server_id)
         self.server_list: list[tuple[str, int]] = []
         self.other_server_list: list[ServerDataRepresentation] = []
+        self.leader: ServerDataRepresentation = None
+
+        # Bully Algo
+        self.response_participation_event = Event()
+        self.response_election_event = Event()
 
         self.auction_server_map: dict[int, ServerDataRepresentation] = {}
 
@@ -110,18 +121,21 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         if data.ip == self.ip and data.port == self.port:
             return
         if self.is_leader() and not data.is_server:
-            self.unicast_socket.send_data(BroadcastAnnounceResponse(self.server_list, self.address), addr)
+            self.send_socket.send_data(BroadcastAnnounceResponse(self.server_list, self.address), (data.ip, data.port))
         elif self.multicast_socket and data.is_server:
             logging.info("New server joining: %s", data)
             self.middleware.add_server(data.uuid)
             self.other_server_list.append(ServerDataRepresentation(data.uuid, data.ip, data.port))
-            self.unicast_socket.send_data(MulticastGroupResponse(self.MULTICAST_GROUP, self.multicast_port), addr)
+            self.send_socket.send_data(MulticastGroupResponse(self.MULTICAST_GROUP, self.multicast_port), (data.ip, data.port))
+            self.bully_algo()
 
     def dynamic_discovery_server_broadcast(self, ip, port=37020):
         logging.debug("Starting broadcast sender")
 
         broadcast_socket = self.create_broadcast_socket()
-        message = BroadcastAnnounceRequest(self.host, self.ip, self.port, self.server_id, True)
+        broadcast_socket.bind((self.ip, 0))
+
+        message = BroadcastAnnounceRequest(self.host, broadcast_socket.getsockname()[0], broadcast_socket.getsockname()[1], self.server_id, True)
 
         data: MulticastGroupResponse | None  # to satisfy type checker
         data = broadcast_socket.send_and_receive_data(message, (ip, port), MulticastGroupResponse, timeout=0.2,
@@ -142,33 +156,71 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         self.middleware.add_socket(self.multicast_socket, 'multicast')
 
     def is_leader(self) -> bool:
-        return self.instance_index == 0  # TODO: implement leader election
+        return self.leader is not None and self.leader.uuid == self.server_id
 
     def bully_algo(self):
         # Bully Algo send vote request to all server with bigger UUID than self
-        logging.info("Starting bully algo")
-        logging.info("Own Server Id: %s", self.server_id)
+        logging.info("** Starting bully algo **")
+
+        logging.info("** Own Server Id: %s **", self.server_id)
+        if len(self.other_server_list) <= 0:
+            logging.info("** Stopping bully algo due to empty server list **")
+            return
         for current_server in self.other_server_list:
-            if current_server.uuid.int > self.server_id.int:  # todo: DOES THIS WORK?
-                logging.info("Compared Server ID is bigger, sending vote request: %s", self.server_id)
+            logging.info("** Comparing to Server ID: %s **", current_server.uuid)
+            if current_server.uuid.int > self.server_id.int:
+                logging.info("** Compared Server ID is bigger, sending vote request: %s **", self.server_id)
                 # Unicast msg to server
                 data: UnicastVoteRequest | None  # to satisfy type checker
-                self.unicast_socket.send_data(UnicastVoteRequest("sadfsad", self.ip, self.port),
+                self.send_socket.send_data(UnicastVoteRequest("sadfsad", self.server_id, self.ip, self.port),
                                               (current_server.ip, current_server.port))
         # Now wait if anyone with higher id responds
+        logging.info("** Sent all election messages to servers in list, waiting now for possible responses **")
+        response_received = self.response_participation_event.wait(timeout=2.0)
 
-        # No Replies from others, sending won election to all servers in multicast group
-        # TODO: Multicast msg to all servers
+        if response_received:
+            logging.info("** A higher ID server responded to participate in vote event**")
+            election_received = self.response_election_event.wait(timeout=2.0)
+            if election_received:
+                logging.info("** A higher ID server has been elected**")
+                self.response_participation_event.clear()
+                self.response_election_event.clear()
+                return
+        logging.info("** No response received in 2 second, proceeding with winning election. **")
+        # No Replies from others, sending won election to all servers in multicast group and set self to leader
+        self.middleware.send_multicast(BullyElectedLeaderRequest("Host idk TODO", self.server_id, self.ip, self.port), (self.MULTICAST_GROUP, self.multicast_port))
+        self.leader = ServerDataRepresentation(self.server_id, self.ip, self.port)
+
+        # Reset event for next time
+        self.response_participation_event.clear()
+        self.response_election_event.clear()
         return
 
     def receive_message(self):
         while True:
             data, addr = self.middleware.message_queue.get()
             logging.info("Server received message: %s from %s", data, addr)
-            # TODO call method acording to msg
             match data:
                 case BroadcastAnnounceRequest():
-                    self.dynamic_discovery(data, addr)
+                    #self.dynamic_discovery(data, addr)
+                    #logging.debug("** Starting thread for messages **")
+                    threading.Thread(target=self.dynamic_discovery, args= (data, addr), daemon=True).start()
+                case BullyElectedLeaderRequest():
+                    logging.info("** Setting election event participation to true **")
+                    self.response_election_event.set()
+                    if data.uuid < self.server_id:
+                        self.bully_algo()
+                    else:
+                        logging.info("** Saving new Leader:" + str(data.uuid) + " **")
+                        temp = ServerDataRepresentation(data.uuid, data.ip, data.port)
+                        self.leader = temp
+                case UnicastVoteRequest(): # Is called by a Server which is performing bully Algo. If their ID is lower, send back a participation message (makes them stop bully for a timeout period)
+                    if data.uuid < self.server_id:
+                        self.unicast_socket.send_data(BullyAcceptVotingParticipationResponse("idk TODO", self.server_id, self.ip, self.port), (data.ip, data.port))
+                        self.bully_algo()
+                case BullyAcceptVotingParticipationResponse(): # Receive when this server is performing bully and someone with higher ID wants to participate.
+                    logging.info("** Setting ok event participation to true **")
+                    self.response_participation_event.set()
                 case RetrieveAuctions():
                     if self.is_leader():
                         self.send_socket.send_data(self.auction_manager.get_all_auctions(), addr)
@@ -216,19 +268,26 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                                    (responsible_server.ip, responsible_server.port))
 
 
-if __name__ == "__main__":
+async def main():
     logging_config.setup_logging(logging.DEBUG)
     servers = []
     try:
-        for i in range(1):
+        for i in range(2):
             server = Server(instance_index=i)
             server.start()
-            time.sleep(4)
+            #time.sleep(4)
+            await asyncio.sleep(4)
             servers.append(server)
-        for server in servers:
-            server.join()
+        #for server in servers:
+            #logging.info("Joining Servers")
+            #server.join()
+        #time.sleep(4)
+        await asyncio.sleep(2)
     except KeyboardInterrupt:
         logging.info("Shutting down servers")
         for server in servers:
             server.terminate()
             server.join()
+
+if __name__ == "__main__":
+    asyncio.run(main())

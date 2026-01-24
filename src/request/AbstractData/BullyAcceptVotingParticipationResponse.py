@@ -2,12 +2,10 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from request.AbstractData.AbstractData import AbstractData, register_data_type, DataType
-from request.AbstractData.AbstractMulticastData import AbstractMulticastData
 
-
-@register_data_type(DataType.BULLY_ELECTED_LEADER_REQUEST)
+@register_data_type(DataType.BULLY_ACCEPT_VOTING_PARTICIPATION_RESPONSE)
 @dataclass
-class BullyElectedLeaderRequest(AbstractMulticastData):
+class BullyAcceptVotingParticipationResponse(AbstractData):
     host: str
     uuid: UUID
     ip: str

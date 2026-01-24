@@ -1,4 +1,5 @@
 import logging
+import socket
 import threading
 from queue import Queue
 from uuid import UUID
@@ -63,7 +64,9 @@ class MsgMiddleware(threading.Thread):
         self.current_sequence_number += 1
         self.sender_cache[data.sequence_number] = data
 
-        any_socket = next(iter(self.sockets.keys()))
+        any_socket = Socket()
+        MULTICAST_TTL = 2
+        any_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, MULTICAST_TTL)
         any_socket.send_data(data, addr)
 
     def _send_nack_request(self, nack_request: AbstractMulticastData, addr: tuple[str, int]):
@@ -93,7 +96,8 @@ class MsgMiddleware(threading.Thread):
         print("expected: ", expected_seq_num)
         # received old message
         if data.sequence_number < expected_seq_num:
-            logging.debug("Discarding old multicast message with seq num %d from %s", data.sequence_number, data.sender_uuid)
+            logging.debug("Discarding old multicast message with seq num %d from %s", data.sequence_number,
+                          data.sender_uuid)
             return  # discard old message
         # received expected message -> can be delivered
         elif expected_seq_num == data.sequence_number:
@@ -116,7 +120,8 @@ class MsgMiddleware(threading.Thread):
 
             # request missing messages
             missing_ids = list(range(expected_seq_num, data.sequence_number))
-            logging.debug("Requesting missing multicast messages with seq nums %s from %s", missing_ids, data.sender_uuid)
+            logging.debug("Requesting missing multicast messages with seq nums %s from %s", missing_ids,
+                          data.sender_uuid)
             self._send_nack_request(MulticastMsgRequest(missing_ids, data.sender_uuid), addr)
 
     def _handle_nack_request(self, data: MulticastMsgRequest, addr: tuple[str, int]):
