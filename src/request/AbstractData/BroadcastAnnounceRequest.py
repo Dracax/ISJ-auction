@@ -1,12 +1,13 @@
 from dataclasses import dataclass
 from uuid import UUID
 
-from request.AbstractData.AbstractData import AbstractData, register_data_type, DataType
+from request.AbstractData.AbstractData import register_data_type, DataType
+from request.AbstractRequest import AbstractRequest
 
 
 @register_data_type(DataType.BROADCAST_ANNOUNCE_REQUEST)
 @dataclass
-class BroadcastAnnounceRequest(AbstractData):
+class BroadcastAnnounceRequest(AbstractRequest):
     host: str
     ip: str
     port: int

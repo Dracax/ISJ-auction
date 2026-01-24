@@ -21,6 +21,7 @@ class DataType(Enum):
     SERVER_ACUTION_PLACE = "ServerPlaceAuction"
     MULTICAST_NEW_AUCTION = "MulticastNewAuction"
     AUCTION_PLACE_RESPONSE = "PlaceAuctionResponse"
+    NOT_LEADER_RESPONSE = "NotLeaderResponse"
 
 
 @dataclass
