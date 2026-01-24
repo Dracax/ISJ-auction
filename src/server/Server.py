@@ -64,7 +64,6 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         self.leader: ServerDataRepresentation = None
 
         # Bully Algo
-        self.electing_new_leader: bool = False
         self.response_participation_event = Event()
         self.response_election_event = Event()
 
@@ -157,7 +156,6 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         logging.info("** Starting bully algo **")
 
         logging.info("** Own Server Id: %s **", self.server_id)
-        self.electing_new_leader = True
         if len(self.other_server_list) <= 0:
             logging.info("** Stopping bully algo due to empty server list **")
             return
@@ -168,7 +166,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                 # Unicast msg to server
                 data: UnicastVoteRequest | None  # to satisfy type checker
                 self.send_socket.send_data(UnicastVoteRequest("sadfsad", self.server_id, self.ip, self.port),
-                                           (current_server.ip, current_server.port))  # TODO
+                                              (current_server.ip, current_server.port))
         # Now wait if anyone with higher id responds
         logging.info("** Sent all election messages to servers in list, waiting now for possible responses **")
         response_received = self.response_participation_event.wait(timeout=2.0)
@@ -182,8 +180,9 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                 self.response_election_event.clear()
                 return
         logging.info("** No response received in 2 second, proceeding with winning election. **")
-        # No Replies from others, sending won election to all servers in multicast group
+        # No Replies from others, sending won election to all servers in multicast group and set self to leader
         self.middleware.send_multicast(BullyElectedLeaderRequest("Host idk TODO", self.server_id, self.ip, self.port), (self.MULTICAST_GROUP, self.multicast_port))
+        self.leader = ServerDataRepresentation(self.server_id, self.ip, self.port)
 
         # Reset event for next time
         self.response_participation_event.clear()
@@ -205,8 +204,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                     if data.uuid < self.server_id:
                         self.bully_algo()
                     else:
-                        logging.info("** Saving new Leader:" + data.uuid + " **")
-                        self.electing_new_leader = False
+                        logging.info("** Saving new Leader:" + str(data.uuid) + " **")
                         temp = ServerDataRepresentation(data.uuid, data.ip, data.port)
                         self.leader = temp
                 case UnicastVoteRequest(): # Is called by a Server which is performing bully Algo. If their ID is lower, send back a participation message (makes them stop bully for a timeout period)
@@ -214,7 +212,6 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                         self.unicast_socket.send_data(BullyAcceptVotingParticipationResponse("idk TODO", self.server_id, self.ip, self.port), (data.ip, data.port))
                         self.bully_algo()
                 case BullyAcceptVotingParticipationResponse(): # Receive when this server is performing bully and someone with higher ID wants to participate.
-                    self.electing_new_leader = False
                     logging.info("** Setting ok event participation to true **")
                     self.response_participation_event.set()
                 case RetrieveAuctions():
