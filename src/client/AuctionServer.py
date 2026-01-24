@@ -27,7 +27,7 @@ class AuctionServer:
         :param open_only: If True, retrieves only open auctions.
         :return: List of auctions.
         """
-        request = RetrieveAuctions(self.client.client_id)
+        request = RetrieveAuctions(self.client.address, self.client.client_id)
 
         self.client.client_socket.send_data(request, self.client.server_to_talk_to)
         msg = self.client.receive_only(timeout=20)
@@ -75,8 +75,9 @@ class AuctionServer:
             print("Nothing received")
     
     def subscribe_2_auction(self, auction_id: int):
-        sub = SubscribeAuction(auction_id, self.client.client_id)
+        sub = SubscribeAuction(self.client.address, auction_id, self.client.client_id)
         self.client.client_socket.send_data(sub, self.client.server_to_talk_to)
+    
     #Where do we place receive function?
     def handle_messages(self, response):
         if isinstance(response, AuctionBidResponse):

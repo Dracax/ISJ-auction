@@ -30,7 +30,7 @@ class Client(threading.Thread, AbstractClientOrServer):
         self.client_id = uuid.uuid4()
 
     def run(self):
-        logging_config.setup_logging(logging.INFO)
+        logging_config.setup_logging(logging.ERROR)
         # logging.info("Starting client process with PID %d", self.pid)
         self.client_socket = Socket()
         self.client_socket.bind((self.ip, 0))
