@@ -121,7 +121,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         if data.ip == self.ip and data.port == self.port:
             return
         if self.is_leader() and not data.is_server:
-            self.send_socket.send_data(BroadcastAnnounceResponse(self.server_list, self.address), (data.ip, data.port))
+            self.send_socket.send_data(BroadcastAnnounceResponse(self.server_list, self.address), addr)
         elif self.multicast_socket and data.is_server:
             logging.info("New server joining: %s", data)
             self.middleware.add_server(data.uuid)
@@ -151,6 +151,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                                                                 self.MULTICAST_TEST_PORT if not self.IS_PRODUCTION else 0)
             self.multicast_port = self.multicast_socket.getsockname()[1]
             logging.info("Created multicast group at %s:%d", self.MULTICAST_GROUP, self.multicast_port)
+            self.leader = ServerDataRepresentation(self.server_id, self.ip, self.port)
 
         broadcast_socket.close()
         self.middleware.add_socket(self.multicast_socket, 'multicast')
@@ -266,6 +267,20 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                                                       auction.starting_bid, auction.auction_owner, auction.owner_id,
                                                       auction.request_address),
                                    (responsible_server.ip, responsible_server.port))
+
+    def handle_bid(self, bid: AuctionBid):
+        if bid.auction_id not in self.auction_server_map:
+            if not self.is_leader():
+                return
+            logging.error("Auction ID not found in auction server map", exc_info=True)
+            self.send_socket.send_data(AuctionBidResponse(False, bid.bid_id, "Auction not found."), bid.request_address)
+        elif self.is_leader() and self.auction_server_map[bid.auction_id].uuid != self.server_id:
+            responsible_server = self.auction_server_map[bid.auction_id]
+            logging.info(f"Forwarding bid for auction {bid.auction_id} to server {responsible_server.uuid}")
+            self.send_socket.send_data(bid, (responsible_server.ip, responsible_server.port))
+        else:
+            response = self.auction_manager.handle_bid(bid)
+            self.send_socket.send_data(response, bid.request_address)
 
 
 async def main():
