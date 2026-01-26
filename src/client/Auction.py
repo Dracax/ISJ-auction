@@ -23,7 +23,7 @@ class AuctionShell(cmd.Cmd):
             item_id = int(item_id_str)
             amount = float(amount_str)
             self.server.send_bid(item_id, amount, self.player.name)
-            print(f"Gebot abgeben: Item {item_id}, Betrag {amount}")
+            #print(f"Gebot abgeben: Item {item_id}, Betrag {amount}")
         except ValueError:
             print("Usage: bid <item_id> <amount>")
 
@@ -34,19 +34,19 @@ class AuctionShell(cmd.Cmd):
             item_name = " ".join(parts[:-1])
             starting_price = float(parts[-1])
             self.server.place_auction(item_name, starting_price, self.player.name)
-            print(f"Item einstellen: {item_name} mit Startpreis {starting_price}")
+            #print(f"Item einstellen: {item_name} mit Startpreis {starting_price}")
         except (ValueError, IndexError):
             print("Usage: post <title> <start_price>")
     
-    def do_sub(self, arg):
-        "Abonniert Updates zu einer Auktion: sub <auction_id>"
-        try:
-            parts = arg.split()
-            auction_id = int(parts[-1])
-            self.server.subscribe_2_auction(auction_id)
-            print(f"Auktion: {auction_id} wurde abonniert")
-        except (ValueError, IndexError):
-            print("Usage: sub <auction_id>")
+    #def do_sub(self, arg):
+    #    "Abonniert Updates zu einer Auktion: sub <auction_id>"
+    #    try:
+    #        parts = arg.split()
+    #        auction_id = int(parts[-1])
+    #        self.server.subscribe_2_auction(auction_id)
+    #        print(f"Auktion: {auction_id} wurde abonniert")
+    #    except (ValueError, IndexError):
+    #        print("Usage: sub <auction_id>")
 
     def do_exit(self, arg):
         "Beendet die Shell"

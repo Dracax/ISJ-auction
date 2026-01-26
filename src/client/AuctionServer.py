@@ -10,6 +10,7 @@ from request.AbstractData.PlaceAuctionData import PlaceAuctionData
 from request.AbstractData.SubscribeAuction import SubscribeAuction
 from request.AbstractData.AuctionBidResponse import AuctionBidResponse
 from request.AbstractData.RetrieveAuctionsResponse import RetrieveAuctionsResponse
+from request.AbstractData.NotLeaderResponse import NotLeaderResponse
 
 class AuctionServer:
     """
@@ -31,10 +32,23 @@ class AuctionServer:
 
         self.client.client_socket.send_data(request, self.client.server_to_talk_to)
         msg = self.client.receive_only(timeout=20)
+        resend = False
         if msg:
-            print("Got:", msg)
+            resend = self.handle_messages(msg)
+            if resend:
+                print('Unknown leader')
+                self.retrieve_auctions()
         else:
-            print("Nothing received")
+            print('No response. Resending request.')
+            self.client.client_socket.send_data(request, self.client.server_to_talk_to)
+            msg_2 = self.client.receive_only(timeout=20)
+            if msg_2:
+                resend =self.handle_messages(msg_2)
+            else: 
+                print('Dynamic discovery')
+                self.client._start_dynamic_discovery(self.client.get_broadcast_address(), 8000)
+
+
 
 
     def place_auction(self, title: str, starting_price: float, name: str):
@@ -53,7 +67,7 @@ class AuctionServer:
         self.client.client_socket.send_data(new_auction, self.client.server_to_talk_to)
         msg = self.client.receive_only(timeout=20)
         if msg:
-            print("Got:", msg)
+            resend = self.handle_messages(msg)
         else:
             print("Nothing received")
         
@@ -70,23 +84,42 @@ class AuctionServer:
         logging.debug("Send Bid")
         msg = self.client.receive_only(timeout=20)
         if msg:
-            self.handle_messages(msg)
+            resend = self.handle_messages(msg)
+            if resend:
+                print('Unknown leader')
+                self.send_bid(auction_id, amount, name)
         else:
-            print("Nothing received")
+            print('No response. Resending request.')
+            self.client.client_socket.send_data(bid, self.client.server_to_talk_to)
+            msg_2 = self.client.receive_only(timeout=20)
+            if msg_2:
+                resend =self.handle_messages(msg_2)
+            else: 
+                print('Nothing received, starting Dynamic discovery')
+                self.client._start_dynamic_discovery(self.client.get_broadcast_address(), 8000)
+
     
-    def subscribe_2_auction(self, auction_id: int):
-        sub = SubscribeAuction(self.client.address, auction_id, self.client.client_id)
-        self.client.client_socket.send_data(sub, self.client.server_to_talk_to)
+    #def subscribe_2_auction(self, auction_id: int):
+    #    sub = SubscribeAuction(self.client.address, auction_id, self.client.client_id)
+    #    self.client.client_socket.send_data(sub, self.client.server_to_talk_to)
     
     #Where do we place receive function?
     def handle_messages(self, response):
         if isinstance(response, AuctionBidResponse):
             if response.success:
                 print(response.message)
+                return False
             else:
                 print(f"Bid {response.bid_id} rejected: {response.message}")
-        if isinstance(response, RetrieveAuctionsResponse):
+                return False
+        elif isinstance(response, RetrieveAuctionsResponse):
             print(response.auctions)
+            return False
+        elif isinstance(response, NotLeaderResponse):
+            print("Path taken")
+            self.client.server_to_talk_to = response.leader_address
+            return True
         else:
-            print('Implement this.')
+            print('Unknown return message.')
+            return True
 
