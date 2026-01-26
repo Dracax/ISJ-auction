@@ -55,6 +55,7 @@ class Client(threading.Thread, AbstractClientOrServer):
 
         broadcast_socket = self.create_broadcast_socket()
 
+        broadcast_socket.bind((self.ip, 0))  # bind to any available port
         address = broadcast_socket.getsockname()
         message = BroadcastAnnounceRequest(address, self.host, self.ip, self.port,
                                            self.client_id)  # TODO: generate uuid do we need it?
