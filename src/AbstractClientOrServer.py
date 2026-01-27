@@ -12,6 +12,7 @@ class AbstractClientOrServer(ABC):
 
         # should be set after binding to the socket
         self.port: int | None = None
+        self.ip: str | None = None
         self.address: tuple[str, int] | None = None
 
     @staticmethod
@@ -20,8 +21,7 @@ class AbstractClientOrServer(ABC):
         network = ipaddress.IPv4Network(f"{local_ip}/24", strict=False)
         return str(network.broadcast_address)
 
-    @staticmethod
-    def setup_multicast_socket(multicast_group, multicast_port):
+    def setup_multicast_socket(self, multicast_group, multicast_port):
         sock = Socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         IS_ALL_GROUPS = True
@@ -33,7 +33,7 @@ class AbstractClientOrServer(ABC):
             sock.bind((multicast_group, multicast_port))
         mreq = struct.pack("4sl", socket.inet_aton(multicast_group), socket.INADDR_ANY)
 
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(self.ip))
 
         return sock
 
