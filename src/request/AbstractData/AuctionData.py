@@ -10,3 +10,4 @@ class AuctionData:
     starting_price: float
     current_bidder: Optional[str]  # Adress of Bidder, UIID of Bidder?
     item_owner: str  # Right data format?
+    client_address: tuple[str, int]

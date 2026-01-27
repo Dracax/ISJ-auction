@@ -22,6 +22,9 @@ class DataType(Enum):
     MULTICAST_NEW_AUCTION = "MulticastNewAuction"
     AUCTION_PLACE_RESPONSE = "PlaceAuctionResponse"
     NOT_LEADER_RESPONSE = "NotLeaderResponse"
+    SYNCDATA_REQUEST = "SyncDataRequest"
+    FAIL_STOP_MSG = "FailStopMsg"
+    MULTICAST_NEW_BID = "MulticastNewBid"
 
 
 @dataclass

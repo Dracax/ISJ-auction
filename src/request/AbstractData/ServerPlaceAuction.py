@@ -11,6 +11,9 @@ class ServerPlaceAuction(AbstractData):
     processing_server_id: UUID
     title: str
     starting_bid: float
+    current_bid: float | None
     auction_owner: str
+    current_bidder: str
     owner_id: UUID
     client_address: tuple[str, int]
+    reassignment: bool = False

@@ -50,7 +50,11 @@ class MsgMiddleware(threading.Thread):
 
             readable, _, _ = select.select(current_sockets, [], [], 1.0)
             for sock in readable:
-                data, addr = sock.receive_data()
+                try:
+                    data, addr = sock.receive_data()
+                except ConnectionResetError as e:
+                    logging.error("ConnectionResetError while receiving data: %s", e)
+                    continue
                 if data is None:
                     continue
                 message_type = self.sockets.get(sock)

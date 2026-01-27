@@ -4,6 +4,7 @@ from typing import Dict
 from request.AbstractData.AuctionBid import AuctionBid
 from request.AbstractData.AuctionBidResponse import AuctionBidResponse
 from request.AbstractData.AuctionData import AuctionData
+from request.AbstractData.MulticastNewAction import MulticastNewBid
 from request.AbstractData.RetrieveAuctionsResponse import RetrieveAuctionsResponse
 from request.AbstractData.ServerPlaceAuction import ServerPlaceAuction
 
@@ -14,8 +15,8 @@ class AuctionManager:
         self.auctions: Dict[int, AuctionData] = {}
 
     def add_auction(self, auction: ServerPlaceAuction):
-        self.auctions[auction.auction_id] = AuctionData(auction.auction_id, auction.title, auction.starting_bid,
-                                                        auction.starting_bid, None, auction.auction_owner)
+        self.auctions[auction.auction_id] = AuctionData(auction.auction_id, auction.title, auction.current_bid,
+                                                        auction.starting_bid, auction.current_bidder, auction.auction_owner, auction.client_address)
         logging.info(f"Auction added: {auction}")
 
     def handle_bid(self, bid: AuctionBid) -> AuctionBidResponse:
@@ -39,3 +40,11 @@ class AuctionManager:
         if not self.auctions:
             return 1
         return max(self.auctions.keys()) + 1
+
+    def set_bid(self, data: MulticastNewBid):
+        if data.auction_id in self.auctions:
+            self.auctions[data.auction_id].current_price = data.new_bid
+            self.auctions[data.auction_id].current_bidder = data.new_bidder
+            logging.info(f"Auction bid updated via multicast: {self.auctions[data.auction_id]}")
+        else:
+            logging.warning(f"Auction ID {data.auction_id} not found for multicast bid update.")
