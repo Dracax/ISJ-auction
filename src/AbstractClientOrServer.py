@@ -16,8 +16,7 @@ class AbstractClientOrServer(ABC):
 
     @staticmethod
     def get_broadcast_address() -> str:
-        hostname = socket.gethostname()
-        local_ip = socket.gethostbyname(hostname)
+        local_ip = AbstractClientOrServer.get_local_ip()
         network = ipaddress.IPv4Network(f"{local_ip}/24", strict=False)
         return str(network.broadcast_address)
 
@@ -37,6 +36,15 @@ class AbstractClientOrServer(ABC):
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
         return sock
+
+    @staticmethod
+    def get_local_ip():
+        interfaces = socket.gethostbyname_ex(socket.gethostname())[2]
+        # Filter out VirtualBox/VMware interfaces (commonly 192.168.56.x or 192.168.99.x)
+        for ip in interfaces:
+            if not ip.startswith('192.168.56.') and not ip.startswith('192.168.99.'):
+                return ip
+        return interfaces[0] if interfaces else '127.0.0.1'
 
     @staticmethod
     def create_broadcast_socket() -> Socket:

@@ -57,7 +57,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         self.send_socket: Socket = None
 
         self.host = socket.gethostname()
-        self.ip = socket.gethostbyname(self.host)
+        self.ip = self.get_local_ip()
         self.multicast_port: int = None
         self.multicast_address: tuple[str, int] = None
 
@@ -131,7 +131,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             self.send_socket.send_data(MulticastGroupResponse(self.MULTICAST_GROUP, self.multicast_port), data.request_address)
             self.bully_algo()
 
-    def dynamic_discovery_server_broadcast(self, ip, port=37020):
+    def dynamic_discovery_server_broadcast(self, ip, port):
         logging.debug("Starting broadcast sender")
 
         broadcast_socket = self.create_broadcast_socket()
