@@ -96,7 +96,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         logging.info(f"Server bound to {self.ip}:{self.port}")
 
         # broadcast socket
-        ADDRESS = ("0.0.0.0", 8000)
+        ADDRESS = ("", self.SERVER_BROADCAST_PORT)
         self.broadcast_socket: Socket = self.create_broadcast_socket()
         self.broadcast_socket.bind(ADDRESS)
 

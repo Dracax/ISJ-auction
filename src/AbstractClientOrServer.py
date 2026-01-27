@@ -1,6 +1,5 @@
 import ipaddress
 import socket
-import struct
 from abc import ABC
 
 from Socket import Socket
@@ -24,15 +23,15 @@ class AbstractClientOrServer(ABC):
     def setup_multicast_socket(self, multicast_group, multicast_port):
         sock = Socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        IS_ALL_GROUPS = True
-        if IS_ALL_GROUPS:
-            # on this port, receives ALL multicast groups
-            sock.bind(('', multicast_port))
-        else:
-            # on this port, listen ONLY to MCAST_GRP
-            sock.bind((multicast_group, multicast_port))
-        mreq = struct.pack("4sl", socket.inet_aton(multicast_group), socket.INADDR_ANY)
 
+        # Bind to all interfaces or specific port
+        sock.bind(('', multicast_port))
+
+        # Join multicast group on the CORRECT interface
+        mreq = socket.inet_aton(multicast_group) + socket.inet_aton(self.ip)  # Use self.ip, not INADDR_ANY
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+
+        # Set outgoing interface for multicast
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(self.ip))
 
         return sock
