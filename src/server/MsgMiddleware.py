@@ -1,10 +1,7 @@
+import asyncio
 import logging
 import socket
-import threading
-from queue import Queue
 from uuid import UUID
-
-import select
 
 from Socket import Socket
 from request.AbstractData.AbstractData import AbstractData
@@ -13,12 +10,12 @@ from request.AbstractData.MulticastMsgRequest import MulticastMsgRequest
 from server.UniquePriorityQueue import UniquePriorityQueue, PrioritizedItem
 
 
-class MsgMiddleware(threading.Thread):
+class MsgMiddleware:
     def __init__(self, server_id: UUID, sockets: dict[Socket, str]):
         super(MsgMiddleware, self).__init__()
         self.server_id = server_id
         self.sockets = sockets
-        self._lock = threading.Lock()
+        self._lock = asyncio.Lock()
 
         self._handlers = {
             'broadcast': self._handle_broadcast_message,
@@ -27,7 +24,8 @@ class MsgMiddleware(threading.Thread):
         }
 
         # Queue for thread communication
-        self.message_queue: Queue[tuple[AbstractData, tuple[str, int]]] = Queue()
+        self.message_queue: asyncio.Queue[tuple[AbstractData, tuple[str, int]]] = asyncio.Queue()
+        self._socket_tasks: dict[Socket, asyncio.Task] = {}
 
         # testing
         self.msg_ids = [2, 1, 4, 3, 0]
@@ -39,28 +37,64 @@ class MsgMiddleware(threading.Thread):
         self.sender_cache: dict[int, AbstractMulticastData] = {}
         self.server_queues: dict[UUID, UniquePriorityQueue] = {}
 
-    def run(self):
+    async def run(self):
+        # event loop
         logging.info("Starting MsgMiddleware")
-        while True:
-            with self._lock:
-                current_sockets = list(self.sockets.keys())
+        self._running = True
 
-            if not current_sockets:
-                continue
+        # Start tasks for initially registered sockets
+        async with self._lock:
+            for sock, msg_type in self.sockets.items():
+                self._start_socket_task(sock, msg_type)
 
-            readable, _, _ = select.select(current_sockets, [], [], 1.0)
-            for sock in readable:
-                try:
-                    data, addr = sock.receive_data()
-                except ConnectionResetError as e:
-                    logging.error("ConnectionResetError while receiving data: %s", e)
-                    continue
-                if data is None:
-                    continue
-                message_type = self.sockets.get(sock)
-                handler = self._handlers.get(message_type)
-                if handler:
-                    handler(data, addr)  # noqa
+        # Keep running until stopped
+        while self._running:
+            await asyncio.sleep(1.0)
+
+    def _start_socket_task(self, sock: Socket, message_type: str):
+        """Create a dedicated receive task for a socket."""
+        task = asyncio.create_task(self._socket_receive_loop(sock, message_type))
+        self._socket_tasks[sock] = task
+        logging.info("Started receive task for socket type: %s", message_type)
+
+    async def _socket_receive_loop(self, sock: Socket, message_type: str):
+        """Dedicated receive loop for a single socket."""
+        loop = asyncio.get_event_loop()
+        handler = self._handlers.get(message_type)
+
+        while self._running:
+            try:
+                # Run blocking receive in executor
+                data, addr = await loop.run_in_executor(None, sock.receive_data)
+                if data and handler:
+                    await handler(data, addr)
+            except ConnectionResetError as e:
+                logging.error("ConnectionResetError: %s", e)
+            except Exception as e:
+                logging.error("Error in socket receive loop: %s", e)
+                break
+
+        # old blocking implementation
+        # while True:
+        #     with self._lock:
+        #         current_sockets = list(self.sockets.keys())
+        #
+        #     if not current_sockets:
+        #         continue
+        #
+        #     readable, _, _ = select.select(current_sockets, [], [], 1.0)
+        #     for sock in readable:
+        #         try:
+        #             data, addr = sock.receive_data()
+        #         except ConnectionResetError as e:
+        #             logging.error("ConnectionResetError while receiving data: %s", e)
+        #             continue
+        #         if data is None:
+        #             continue
+        #         message_type = self.sockets.get(sock)
+        #         handler = self._handlers.get(message_type)
+        #         if handler:
+        #             handler(data, addr)  # noqa
 
     def send_multicast(self, data: AbstractMulticastData, addr: tuple[str, int]):
         data.sender_uuid = self.server_id
@@ -80,19 +114,19 @@ class MsgMiddleware(threading.Thread):
         any_socket = next(iter(self.sockets.keys()))
         any_socket.send_data(nack_request, addr)
 
-    def _handle_broadcast_message(self, data: AbstractData, addr):
-        self.message_queue.put((data, addr))
+    async def _handle_broadcast_message(self, data: AbstractData, addr):
+        await self.message_queue.put((data, addr))
 
-    def _handle_unicast_message(self, data: AbstractData, addr):
+    async def _handle_unicast_message(self, data: AbstractData, addr):
         # process unicast message
         if isinstance(data, MulticastMsgRequest):
             self._handle_nack_request(data, addr)
         elif isinstance(data, AbstractMulticastData):
-            self._handle_multicast_message(data, addr)
+            await self._handle_multicast_message(data, addr)
         else:
-            self.message_queue.put((data, addr))
+            await self.message_queue.put((data, addr))
 
-    def _handle_multicast_message(self, data: AbstractMulticastData, addr):
+    async def _handle_multicast_message(self, data: AbstractMulticastData, addr):
         if data.sender_uuid == self.server_id:
             return  # ignore own messages
         self._handle_new_server(data)
@@ -105,7 +139,7 @@ class MsgMiddleware(threading.Thread):
             return  # discard old message
         # received expected message -> can be delivered
         elif expected_seq_num == data.sequence_number:
-            self._deliver_multicast_msg(data, addr)
+            await self._deliver_multicast_msg(data, addr)
             expected_seq_num += + 1
             # check if queued messages can now be delivered
             queue = self.server_queues.get(data.sender_uuid)
@@ -113,7 +147,7 @@ class MsgMiddleware(threading.Thread):
                 item: PrioritizedItem = queue.peek()
                 if item.priority != expected_seq_num:
                     break
-                self._deliver_multicast_msg(queue.get().item, addr)
+                await self._deliver_multicast_msg(queue.get().item, addr)
                 expected_seq_num += + 1
         # received newer message -> gap in the message arrival
         elif expected_seq_num < data.sequence_number:
@@ -142,9 +176,9 @@ class MsgMiddleware(threading.Thread):
                 any_socket = next(iter(self.sockets.keys()))
                 any_socket.send_data(cached_msg, addr)
 
-    def _deliver_multicast_msg(self, data: AbstractMulticastData, addr: tuple[str, int]):
+    async def _deliver_multicast_msg(self, data: AbstractMulticastData, addr: tuple[str, int]):
         logging.debug("Delivering multicast message with seq num %d from %s", data.sequence_number, data.sender_uuid)
-        self.message_queue.put((data, addr))
+        await self.message_queue.put((data, addr))
         self.server_sequence_numbers[data.sender_uuid] = data.sequence_number
 
     def _handle_new_server(self, data: AbstractMulticastData):
@@ -155,16 +189,28 @@ class MsgMiddleware(threading.Thread):
         self.server_queues[server_id] = UniquePriorityQueue()
         self.server_sequence_numbers[server_id] = sequence_number
 
-    def add_socket(self, sock: Socket, message_type: str):
-        """Fügt einen Socket dynamisch hinzu."""
-        with self._lock:
+    async def add_socket(self, sock: Socket, message_type: str):
+        """Dynamically add a socket and start its receive task."""
+        async with self._lock:
             if sock not in self.sockets:
                 self.sockets[sock] = message_type
-                logging.info("Socket hinzugefügt:")
+                if self._running:
+                    self._start_socket_task(sock, message_type)
+                logging.info("Socket added: %s", message_type)
 
-    def remove_socket(self, sock):
-        """Entfernt einen Socket."""
-        with self._lock:
+    async def remove_socket(self, sock: Socket):
+        """Remove a socket and cancel its receive task."""
+        async with self._lock:
             if sock in self.sockets:
                 del self.sockets[sock]
-                logging.info("Socket entfernt:")
+                if sock in self._socket_tasks:
+                    self._socket_tasks[sock].cancel()
+                    del self._socket_tasks[sock]
+                logging.info("Socket removed")
+
+    async def stop(self):
+        """Stop all socket tasks."""
+        self._running = False
+        for task in self._socket_tasks.values():
+            task.cancel()
+        self._socket_tasks.clear()

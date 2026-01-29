@@ -3,10 +3,8 @@ import logging
 import multiprocessing
 import os
 import socket
-import threading
-import time
 import uuid
-from multiprocessing import Event
+from asyncio import Event
 
 import logging_config
 from AbstractClientOrServer import AbstractClientOrServer
@@ -65,14 +63,14 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         self.middleware: MsgMiddleware = None
 
         self.server_id = uuid.uuid4()
-        logging.debug(self.server_id)
+        logging.info(self.server_id)
         self.server_list: list[tuple[str, int]] = []
         self.other_server_list: list[ServerDataRepresentation] = []
         self.leader: ServerDataRepresentation = None
 
-        # Bully Algo
-        self.response_participation_event = Event()
-        self.response_election_event = Event()
+        # Bully Algo - use asyncio Events
+        self.response_participation_event: Event = None
+        self.response_election_event: Event = None
 
         self.auction_server_map: dict[int, ServerDataRepresentation] = {}
 
@@ -87,6 +85,15 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         else:
             logging.info("Development: starting server process with PID %d", os.getpid())
 
+        # Run the async main loop
+        asyncio.run(self._async_run())
+
+    async def _async_run(self):
+        """Main async entry point for the server."""
+        # Initialize asyncio events
+        self.response_participation_event = asyncio.Event()
+        self.response_election_event = asyncio.Event()
+
         # unicast socket
         self.unicast_socket: Socket = self.create_unicast_socket()
         self.unicast_socket.bind((self.ip, self.UNICAST_PORT))
@@ -100,8 +107,12 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         self.broadcast_socket: Socket = self.create_broadcast_socket()
         self.broadcast_socket.bind(ADDRESS)
 
-        threading.Thread(target=self.dynamic_discovery_server_broadcast,
-                         args=(self.get_broadcast_address(), self.SERVER_BROADCAST_PORT), daemon=True).start()
+        # Run dynamic discovery in executor (blocking I/O)
+        test = asyncio.create_task(
+            self.dynamic_discovery_server_broadcast(
+                self.get_broadcast_address(),
+                self.SERVER_BROADCAST_PORT)
+        )
 
         self.send_socket = Socket()
 
@@ -112,14 +123,15 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         if not self.IS_PRODUCTION:
             self.middleware.add_server(uuid.UUID("2add30b2-5762-4046-bf81-0acdd8cbde2c"))  # for testing
 
-        self.middleware.start()
-
         self.auction_manager = AuctionManager()
 
-        self.receive_message()
-        self.middleware.join()
+        # Run middleware and message receiver concurrently
+        await asyncio.gather(
+            self.middleware.run(),
+            self.receive_message()
+        )
 
-    def dynamic_discovery(self, data: BroadcastAnnounceRequest, addr: tuple[str, int]):
+    async def dynamic_discovery(self, data: BroadcastAnnounceRequest, addr: tuple[str, int]):
         if data.ip == self.ip and data.port == self.port:
             return
         if self.is_leader() and not data.is_server:
@@ -129,9 +141,10 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             self.middleware.add_server(data.uuid)
             self.other_server_list.append(ServerDataRepresentation(data.uuid, data.ip, data.port))
             self.send_socket.send_data(MulticastGroupResponse(self.MULTICAST_GROUP, self.multicast_port), data.request_address)
-            self.bully_algo()
+            await self.bully_algo()
 
-    def dynamic_discovery_server_broadcast(self, ip, port):
+    async def dynamic_discovery_server_broadcast(self, ip, port):
+        """Blocking method - should be run in executor."""
         logging.debug("Starting broadcast sender")
 
         broadcast_socket = self.create_broadcast_socket()
@@ -139,7 +152,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
         message = BroadcastAnnounceRequest(broadcast_socket.getsockname(), self.host, self.ip, self.port, self.server_id, True)
 
-        data: MulticastGroupResponse | None  # to satisfy type checker
+        data: MulticastGroupResponse | None
         data = broadcast_socket.send_and_receive_data(message, (ip, port), MulticastGroupResponse, timeout=0.2, retries=2)
 
         if data:
@@ -157,75 +170,80 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             self.leader = ServerDataRepresentation(self.server_id, self.ip, self.port)
 
         broadcast_socket.close()
-        self.middleware.add_socket(self.multicast_socket, 'multicast')
+        await self.middleware.add_socket(self.multicast_socket, 'multicast')
 
     def is_leader(self) -> bool:
         return self.leader is not None and self.leader.uuid == self.server_id
 
-    def bully_algo(self):
-        # Bully Algo send vote request to all server with bigger UUID than self
+    async def bully_algo(self):
+        """Async bully algorithm implementation."""
         logging.info("** Starting bully algo **")
 
         logging.info("** Own Server Id: %s **", self.server_id)
         if len(self.other_server_list) <= 0:
             logging.info("** Stopping bully algo due to empty server list **")
             return
+
         for current_server in self.other_server_list:
             logging.info("** Comparing to Server ID: %s **", current_server.uuid)
             if current_server.uuid.int > self.server_id.int:
                 logging.info("** Compared Server ID is bigger, sending vote request: %s **", self.server_id)
-                # Unicast msg to server
-                data: UnicastVoteRequest | None  # to satisfy type checker
                 self.send_socket.send_data(UnicastVoteRequest("sadfsad", self.server_id, self.ip, self.port),
                                            (current_server.ip, current_server.port))
-        # Now wait if anyone with higher id responds
-        logging.info("** Sent all election messages to servers in list, waiting now for possible responses **")
-        response_received = self.response_participation_event.wait(timeout=1.0)
 
-        if response_received:
+        logging.info("** Sent all election messages to servers in list, waiting now for possible responses **")
+
+        # Wait for participation response with timeout
+        try:
+            await asyncio.wait_for(self.response_participation_event.wait(), timeout=1.0)
             logging.info("** A higher ID server responded to participate in vote event**")
-            election_received = self.response_election_event.wait(timeout=1.0)
-            if election_received:
+
+            # Wait for election response with timeout
+            try:
+                await asyncio.wait_for(self.response_election_event.wait(), timeout=1.0)
                 logging.info("** A higher ID server has been elected**")
                 self.response_participation_event.clear()
                 self.response_election_event.clear()
                 return
-        logging.info("** No response received in 2 second, proceeding with winning election. **")
-        # No Replies from others, sending won election to all servers in multicast group and set self to leader
+            except asyncio.TimeoutError:
+                pass
+        except asyncio.TimeoutError:
+            pass
+
+        logging.info("** No response received in timeout, proceeding with winning election. **")
         self.middleware.send_multicast(BullyElectedLeaderRequest("Host idk TODO", self.server_id, self.ip, self.port),
                                        (self.MULTICAST_GROUP, self.multicast_port))
         self.leader = ServerDataRepresentation(self.server_id, self.ip, self.port)
 
-        # Reset event for next time
+        # Reset events for next time
         self.response_participation_event.clear()
         self.response_election_event.clear()
-        return
 
-    def receive_message(self):
+    async def receive_message(self):
         try:
             logging.info("Server waiting for messages...")
             while True:
-                data, addr = self.middleware.message_queue.get()
+                data, addr = await self.middleware.message_queue.get()
                 logging.info("Server received message: %s from %s", data, addr)
+
                 if isinstance(data, SubscribeAuction):
                     raise Exception("Not Implemented")
-                # If not leader, respond with NotLeaderResponse. Only if this server is not leader and it's the first arrival of the request.
+
+                # If not leader, respond with NotLeaderResponse
                 if isinstance(data, AbstractClientRequest) and not self.is_leader() and data.first_arrival:
                     self.send_socket.send_data(NotLeaderResponse(False, (self.leader.ip, self.leader.port)), data.request_address)
-                    return
+                    continue
                 elif isinstance(data, AbstractClientRequest):
                     data.first_arrival = False  # mark that the request has arrived once
 
                 match data:
                     case BroadcastAnnounceRequest():
-                        # self.dynamic_discovery(data, addr)
-                        # logging.debug("** Starting thread for messages **")
-                        threading.Thread(target=self.dynamic_discovery, args=(data, addr), daemon=True).start()
+                        asyncio.create_task(self.dynamic_discovery(data, addr))
                     case BullyElectedLeaderRequest():
                         logging.info("** Setting election event participation to true **")
                         self.response_election_event.set()
                         if data.uuid < self.server_id:
-                            self.bully_algo()
+                            asyncio.create_task(self.bully_algo())
                         else:
                             logging.info("** Saving new Leader:" + str(data.uuid) + " **")
                             temp = ServerDataRepresentation(data.uuid, data.ip, data.port)
@@ -234,8 +252,8 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                         if data.uuid < self.server_id:
                             self.unicast_socket.send_data(BullyAcceptVotingParticipationResponse("idk TODO", self.server_id, self.ip, self.port),
                                                           (data.ip, data.port))
-                            self.bully_algo()
-                    case BullyAcceptVotingParticipationResponse():  # Receive when this server is performing bully and someone with higher ID wants to participate.
+                            asyncio.create_task(self.bully_algo())
+                    case BullyAcceptVotingParticipationResponse():
                         logging.info("** Setting ok event participation to true **")
                         self.response_participation_event.set()
                     case RetrieveAuctions():
@@ -244,9 +262,9 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                     case SubscribeAuction():
                         raise Exception("Not implemented yet")
                     case AuctionBid():
-                        self.handle_bid(data)
+                        await self.handle_bid(data)
                     case PlaceAuctionData():
-                        self.place_auction(data)
+                        await self.place_auction(data)
                     case ServerPlaceAuction():
                         if data.processing_server_id != self.server_id:
                             logging.error("Wrong server received msg", exc_info=True)
@@ -267,7 +285,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                                                                                             data.processing_server_ip,
                                                                                             data.processing_server_port)
                     case FailStopMsg():
-                        self.handle_fail_of_server(data)
+                        await self.handle_fail_of_server(data)
                     case SyncDataRequest():
                         pass
                     case MulticastNewBid():
@@ -280,7 +298,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             self.middleware.send_multicast(FailStopMsg(self.server_id, self.is_leader(), []), self.multicast_address)
             self.kill()
 
-    def place_auction(self, auction: PlaceAuctionData):
+    async def place_auction(self, auction: PlaceAuctionData):
         auction_servers = set(self.auction_server_map.values())
         auction_id = self.auction_manager.get_next_auction_id()
         for server in self.other_server_list:
@@ -297,7 +315,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                                                       auction.request_address),
                                    (responsible_server.ip, responsible_server.port))
 
-    def handle_bid(self, bid: AuctionBid):
+    async def handle_bid(self, bid: AuctionBid):
         if bid.auction_id not in self.auction_server_map:
             if not self.is_leader():
                 return
@@ -313,17 +331,18 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                 self.middleware.send_multicast(MulticastNewBid(bid.auction_id, bid.bid, bid.name), self.multicast_address)
             self.send_socket.send_data(response, bid.request_address)
 
-    def handle_fail_of_server(self, data: FailStopMsg):
+    async def handle_fail_of_server(self, data: FailStopMsg):
         logging.info("Received fail stop msg from %s", data.stop_id)
         self.other_server_list = [server for server in self.other_server_list if server.uuid != data.stop_id]
 
         if data.is_leader:
             logging.info("Leader has failed, starting bully algo")
             self.leader = None
-            self.bully_algo()
+            await self.bully_algo()
 
         auctions_of_failed_server = [auction_id for auction_id, server in self.auction_server_map.items() if server.uuid == data.stop_id]
         self.auction_server_map = {auction_id: server for auction_id, server in self.auction_server_map.items() if server.uuid != data.stop_id}
+
         if self.is_leader():
             for auction_id in auctions_of_failed_server:
                 for server in self.other_server_list:
@@ -348,19 +367,20 @@ async def main():
     logging_config.setup_logging(logging.INFO)
     servers = []
     import random
-    time.sleep(random.randint(1, 5) * 0.5)
+    await asyncio.sleep(random.randint(1, 5) * 0.5)
     try:
-        for i in range(2):
+        for i in range(1):
             server = Server(instance_index=i)
             server.start()
-            #time.sleep(4)
-            await asyncio.sleep(4)
+            await asyncio.sleep(1)
             servers.append(server)
-        #for server in servers:
-            #logging.info("Joining Servers")
-            #server.join()
-        #time.sleep(4)
-        await asyncio.sleep(2)
+
+        # Wait for all servers in executor since join() is blocking
+        loop = asyncio.get_event_loop()
+        for server in servers:
+            logging.info("Joining Servers")
+            await loop.run_in_executor(None, server.join)
+
     except KeyboardInterrupt:
         logging.info("Shutting down servers")
         for server in servers:

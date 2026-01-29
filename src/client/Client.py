@@ -23,7 +23,7 @@ class Client(threading.Thread, AbstractClientOrServer):
     
 
         self.host = socket.gethostname()
-        self.ip = socket.gethostbyname(self.host)
+        self.ip = self.get_local_ip()
 
         self.server_list: list[tuple[str, int]] = []
         self.server_to_talk_to: tuple[str, int] | None = None
