@@ -22,8 +22,8 @@ def setup_logging(level=logging.INFO):
 
     # Create formatter with time, process, thread, level, and message
     formatter = logging.Formatter(
-        fmt='%(asctime)s - PID:%(process)d - Thread:%(thread)d - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+        fmt='%(asctime)s - PID:%(process)d - Thread:%(thread)d - %(levelname)s - [%(module)s: %(funcName)s] - %(message)s',
+        datefmt='%H:%M:%S'
     )
 
     # Set formatter for console handler
