@@ -25,6 +25,8 @@ class DataType(Enum):
     SYNCDATA_REQUEST = "SyncDataRequest"
     FAIL_STOP_MSG = "FailStopMsg"
     MULTICAST_NEW_BID = "MulticastNewBid"
+    MULTICAST_HEARTBEAT = "MulticastHeartbeat"
+    MULTICAST_HEARTBEAT_ACK = "MulticastHeartbeatAck"
 
 
 @dataclass

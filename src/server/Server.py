@@ -3,11 +3,14 @@ import logging
 import multiprocessing
 import os
 import socket
+import sys
 import uuid
 from asyncio import Event
 
 import logging_config
 from AbstractClientOrServer import AbstractClientOrServer
+from request.AbstractData.MulticastHeartbeat import MulticastHeartbeat
+from server.HeartbeatSenderModule import HeartbeatSenderModule
 from ServerDataRepresentation import ServerDataRepresentation
 from Socket import Socket
 from auction.AuctionManager import AuctionManager
@@ -64,7 +67,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
         self.server_id = uuid.uuid4()
         logging.info(self.server_id)
-        self.other_server_list: list[ServerDataRepresentation] = []
+        self.server_group_view: list[ServerDataRepresentation] = []
         self.leader: ServerDataRepresentation = None
 
         # Bully Algo - use asyncio Events
@@ -75,6 +78,11 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
         # dict of auctions
         self.auctions: dict[int, Auction] = {}
+
+        # Heartbeat
+        self.heartbeat_sender_task = None
+        self.heartbeat_listener_task = None
+        self._heartbeat_event = asyncio.Event()
 
     def run(self):
         # Configure logging for this process
@@ -98,7 +106,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         self.unicast_socket.bind((self.ip, self.UNICAST_PORT))
         self.port = self.unicast_socket.getsockname()[1]
         self.address = (self.ip, self.port)
-        self.other_server_list.append(ServerDataRepresentation(self.server_id, self.ip, self.port))
+        self.server_group_view.append(ServerDataRepresentation(self.server_id, self.ip, self.port))
         logging.info(f"Server bound to {self.ip}:{self.port}")
 
         # broadcast socket
@@ -106,7 +114,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         self.broadcast_socket: Socket = self.create_broadcast_socket()
         self.broadcast_socket.bind(ADDRESS)
 
-        # Run dynamic discovery in executor (blocking I/O)
+        # Run dynamic discovery in executor (blocking I/O) TODO:
         test = asyncio.create_task(
             self.dynamic_discovery_server_broadcast(
                 self.get_broadcast_address(),
@@ -134,12 +142,12 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         if data.ip == self.ip and data.port == self.port:
             return
         if self.is_leader() and not data.is_server:
-            self.send_socket.send_data(BroadcastAnnounceResponse([(x.ip, x.port) for x in self.other_server_list], self.address),
+            self.send_socket.send_data(BroadcastAnnounceResponse([(x.ip, x.port) for x in self.server_group_view], self.address),
                                        data.request_address)
         elif self.multicast_socket and data.is_server:
             logging.info("New server joining: %s", data)
             self.middleware.add_server(data.uuid)
-            self.other_server_list.append(ServerDataRepresentation(data.uuid, data.ip, data.port))
+            self.server_group_view.append(ServerDataRepresentation(data.uuid, data.ip, data.port))
             self.send_socket.send_data(MulticastGroupResponse(self.MULTICAST_GROUP, self.multicast_port), data.request_address)
             await self.bully_algo()
 
@@ -180,11 +188,11 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         logging.info("** Starting bully algo **")
 
         logging.info("** Own Server Id: %s **", self.server_id)
-        if len(self.other_server_list) <= 0:
+        if len(self.server_group_view) <= 0:
             logging.info("** Stopping bully algo due to empty server list **")
             return
 
-        for current_server in self.other_server_list:
+        for current_server in self.server_group_view:
             logging.info("** Comparing to Server ID: %s **", current_server.uuid)
             if current_server.uuid.int > self.server_id.int:
                 logging.info("** Compared Server ID is bigger, sending vote request: %s **", self.server_id)
@@ -219,6 +227,51 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         self.response_participation_event.clear()
         self.response_election_event.clear()
 
+        # Start Heartbeat sender
+        await self.restart_heartbeat()
+
+    async def restart_heartbeat(self):
+        # Stop Heartbeat Sender task if one is running
+        if self.heartbeat_sender_task is not None:
+            self.heartbeat_sender_task.cancel()
+
+        if self.heartbeat_listener_task is not None:
+            self.heartbeat_listener_task.cancel()
+
+        # Start Heartbeat Sender if this server is the elected leader
+        if self.is_leader():
+            heartbeat_sender = HeartbeatSenderModule(self)
+            self.heartbeat_sender_task = asyncio.create_task(heartbeat_sender.run())
+
+        else:
+            # Start listening for Heartbeat
+            self.heartbeat_listener_task = asyncio.create_task(
+                self.wait_for_heartbeat())
+
+    async def wait_for_heartbeat(self):
+        logging.info("Starting heartbeat listener")
+        while True:
+            try:
+                await asyncio.wait_for(
+                    self._heartbeat_event.wait(),
+                    timeout=10 # TODO: No hardcode
+                )
+
+                # Heartbeat received
+                logging.debug("heartbeat event received, resetting timeout")
+                self._heartbeat_event.clear()
+                #self.on_heartbeat_received()
+
+            except asyncio.TimeoutError:
+                logging.warning("heartbeat event timed out")
+                self.middleware.send_multicast(
+                    FailStopMsg(self.leader.uuid, True, []), # TODO: Handle Open Transactions of leader
+                    (self.MULTICAST_GROUP, self.multicast_port))
+                # TODO: I do not receive the multicast myself, put the same logic here (remove leader from group view, start bully algo, ...)
+                # No heartbeat within timeout
+                #self.on_heartbeat_timeout()
+                break
+
     async def receive_message(self):
         try:
             logging.info("Server waiting for messages...")
@@ -248,6 +301,11 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                             logging.info("** Saving new Leader:" + str(data.uuid) + " **")
                             temp = ServerDataRepresentation(data.uuid, data.ip, data.port)
                             self.leader = temp
+                            # Start Heartbeat listener
+                            await self.restart_heartbeat()
+                    case MulticastHeartbeat():
+                        logging.info("Received Heartbeat - Setting event")
+                        self._heartbeat_event.set()
                     case UnicastVoteRequest():  # Is called by a Server which is performing bully Algo. If their ID is lower, send back a participation message (makes them stop bully for a timeout period)
                         if data.uuid < self.server_id:
                             self.unicast_socket.send_data(BullyAcceptVotingParticipationResponse("idk TODO", self.server_id, self.ip, self.port),
@@ -301,7 +359,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
     async def place_auction(self, auction: PlaceAuctionData):
         auction_servers = set(self.auction_server_map.values())
         auction_id = self.auction_manager.get_next_auction_id()
-        for server in self.other_server_list:
+        for server in self.server_group_view:
             if server.uuid != self.server_id and server not in auction_servers:
                 self.auction_server_map[auction_id] = server
                 break
@@ -333,7 +391,12 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
     async def handle_fail_of_server(self, data: FailStopMsg):
         logging.info("Received fail stop msg from %s", data.stop_id)
-        self.other_server_list = [server for server in self.other_server_list if server.uuid != data.stop_id]
+
+        # If the apparently failed server is myself TODO: Instead of kms, try to re-join the group
+        if data.stop_id == self.server_id:
+            sys.exit()
+
+        self.server_group_view = [server for server in self.server_group_view if server.uuid != data.stop_id]
 
         if data.is_leader:
             logging.info("Leader has failed, starting bully algo")
@@ -345,7 +408,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
         if self.is_leader():
             for auction_id in auctions_of_failed_server:
-                for server in self.other_server_list:
+                for server in self.server_group_view:
                     if server.uuid != self.server_id and server.uuid != data.stop_id:
                         self.auction_server_map[auction_id] = server
                         logging.info("Reassigning auction %d to server %s", auction_id, server.uuid)
