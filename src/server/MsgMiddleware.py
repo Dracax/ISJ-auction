@@ -131,7 +131,6 @@ class MsgMiddleware:
             return  # ignore own messages
         self._handle_new_server(data)
         expected_seq_num = self.server_sequence_numbers.get(data.sender_uuid, -1) + 1
-        print("expected: ", expected_seq_num)
         # received old message
         if data.sequence_number < expected_seq_num:
             logging.debug("Discarding old multicast message with seq num %d from %s", data.sequence_number,

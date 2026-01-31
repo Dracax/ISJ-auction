@@ -64,7 +64,6 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
         self.server_id = uuid.uuid4()
         logging.info(self.server_id)
-        self.server_list: list[tuple[str, int]] = []
         self.other_server_list: list[ServerDataRepresentation] = []
         self.leader: ServerDataRepresentation = None
 
@@ -135,7 +134,8 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         if data.ip == self.ip and data.port == self.port:
             return
         if self.is_leader() and not data.is_server:
-            self.send_socket.send_data(BroadcastAnnounceResponse(self.server_list, self.address), data.request_address)
+            self.send_socket.send_data(BroadcastAnnounceResponse([(x.ip, x.port) for x in self.other_server_list], self.address),
+                                       data.request_address)
         elif self.multicast_socket and data.is_server:
             logging.info("New server joining: %s", data)
             self.middleware.add_server(data.uuid)
