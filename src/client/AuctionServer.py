@@ -11,6 +11,7 @@ from request.AbstractData.SubscribeAuction import SubscribeAuction
 from request.AbstractData.AuctionBidResponse import AuctionBidResponse
 from request.AbstractData.RetrieveAuctionsResponse import RetrieveAuctionsResponse
 from request.AbstractData.NotLeaderResponse import NotLeaderResponse
+from request.AbstractData.AuctionBidResponse import AuctionPlaceResponse
 
 class AuctionServer:
     """
@@ -43,7 +44,7 @@ class AuctionServer:
             self.client.client_socket.send_data(request, self.client.server_to_talk_to)
             msg_2 = self.client.receive_only(timeout=20)
             if msg_2:
-                resend =self.handle_messages(msg_2)
+                self.handle_messages(msg_2)
             else: 
                 print('Dynamic discovery')
                 self.client._start_dynamic_discovery(self.client.get_broadcast_address(), 8000)
@@ -68,8 +69,19 @@ class AuctionServer:
         msg = self.client.receive_only(timeout=20)
         if msg:
             resend = self.handle_messages(msg)
+            if resend:
+                print('Unknown leader')
+                self.place_auction(title, starting_price, name)
         else:
-            print("Nothing received")
+            print('No response. Resending request.')
+            self.client.client_socket.send_data(new_auction, self.client.server_to_talk_to)
+            msg_2 = self.client.receive_only(timeout=20)
+            if msg_2:
+                self.handle_messagess(msg_2)
+            else:
+                print("Dynamic discovery")
+                self.client._start_dynamic_discovery(self.client.get_broadcast_address(), 80000)
+                  
         
 
     def send_bid(self, auction_id: int, amount : float, name: str):
@@ -93,7 +105,7 @@ class AuctionServer:
             self.client.client_socket.send_data(bid, self.client.server_to_talk_to)
             msg_2 = self.client.receive_only(timeout=20)
             if msg_2:
-                resend =self.handle_messages(msg_2)
+                self.handle_messages(msg_2)
             else: 
                 print('Nothing received, starting Dynamic discovery')
                 self.client._start_dynamic_discovery(self.client.get_broadcast_address(), 8000)
@@ -119,7 +131,10 @@ class AuctionServer:
             print("Path taken")
             self.client.server_to_talk_to = response.leader_address
             return True
+        elif isinstance(response, AuctionPlaceResponse):
+            print(response.message)
+            return False
         else:
             print('Unknown return message.')
-            return True
+            return False
 
