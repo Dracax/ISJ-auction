@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import socket
 from uuid import UUID
@@ -11,10 +12,13 @@ from server.UniquePriorityQueue import UniquePriorityQueue, PrioritizedItem
 
 
 class MsgMiddleware:
-    def __init__(self, server_id: UUID, sockets: dict[Socket, str]):
+    def __init__(self, server_id: UUID, sockets: dict[Socket, str], ):
         super(MsgMiddleware, self).__init__()
         self.server_id = server_id
         self.sockets = sockets
+        self._running = False
+
+        self.tcp_server_task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
 
         self._handlers = {
@@ -42,20 +46,97 @@ class MsgMiddleware:
         logging.info("Starting MsgMiddleware")
         self._running = True
 
-        # Start tasks for initially registered sockets
-        async with self._lock:
-            for sock, msg_type in self.sockets.items():
-                self._start_socket_task(sock, msg_type)
+        try:
+            async with self._lock:
+                for sock, msg_type in self.sockets.items():
+                    self._start_socket_task(sock, msg_type)
 
-        # Keep running until stopped
-        while self._running:
-            await asyncio.sleep(1.0)
+            while self._running:
+                await asyncio.sleep(1.0)
+        except Exception as e:
+            logging.error("MsgMiddleware run error: %s", e)
+            await self.stop()
 
     def _start_socket_task(self, sock: Socket, message_type: str):
         """Create a dedicated receive task for a socket."""
         task = asyncio.create_task(self._socket_receive_loop(sock, message_type))
         self._socket_tasks[sock] = task
         logging.info("Started receive task for socket type: %s", message_type)
+
+    def start_tcp_server(self, server):
+        self.tcp_server_task = asyncio.create_task(self._start_tcp_server(server))
+
+    async def _start_tcp_server(self, server):
+        async with server:
+            await server.serve_forever()
+
+    async def handle_client(self, reader, writer):
+        """
+        Callback for every new server-to-server connection.
+        This runs concurrently for every connected peer.
+        """
+        addr = writer.get_extra_info('peername')
+        logging.info(f"New connection from {addr}")
+
+        try:
+            while True:
+                # Read data (up to 1024 bytes)
+                data = await reader.read(1024)
+                if not data:
+                    break  # Connection closed by peer
+
+                message = data.decode().strip()
+                logging.debug(f"[{addr}] Received: {message}")
+
+                # Optional: Send an acknowledgement (ACK) back
+                response = f"ACK: {message[0:100]}"
+                writer.write(response.encode())
+                await writer.drain()
+
+                try:
+                    response = Socket.parse_to_data(data)
+                except json.decoder.JSONDecodeError:
+                    logging.error(f"Could not parse data: {data}")
+                    continue
+                if response is None:
+                    logging.error(f"Message is Empty form {addr}")
+                    continue
+                await self.message_queue.put((response, addr))
+
+        except ConnectionResetError:
+            (logging.info(f"TCP-Connection reset by {addr}"))
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    async def send_tcp_message(self, message: AbstractData, addr: tuple[str, int]) -> bool:
+        """
+        Connects to a peer, sends a message, waits for ACK, and closes.
+        """
+        try:
+            # Establish connection
+            reader, writer = await asyncio.open_connection(addr[0], addr[1])
+
+            logging.debug(f"Sending TCP {message} to {addr[0]}:{addr[1]}")
+            writer.write(str.encode(Socket.to_json(message)))
+            await writer.drain()
+
+            # Wait for the ACK
+            data = await reader.read(100)
+
+            decoded_data = data.decode()
+
+            if data is None or not decoded_data.startswith("ACK:"):
+                raise ConnectionRefusedError("Invalid ACK response")
+
+            # Close the connection
+            writer.close()
+            await writer.wait_closed()
+
+        except ConnectionRefusedError:
+            logging.warning("Connection refused from other server ")
+            return False
+        return True
 
     async def _socket_receive_loop(self, sock: Socket, message_type: str):
         """Dedicated receive loop for a single socket."""
@@ -66,6 +147,7 @@ class MsgMiddleware:
             try:
                 # Run blocking receive in executor
                 data, addr = await loop.run_in_executor(None, sock.receive_data)
+                logging.debug(f"[MsgMiddleware] Received {type(data).__name__} from {addr} on {sock} socket")
                 if data and handler:
                     await handler(data, addr)
             except ConnectionResetError as e:
@@ -106,6 +188,7 @@ class MsgMiddleware:
         MULTICAST_TTL = 2
         any_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, MULTICAST_TTL)
         any_socket.send_data(data, addr)
+        any_socket.close()
 
     def _send_nack_request(self, nack_request: AbstractMulticastData, addr: tuple[str, int]):
         nack_request.sender_uuid = self.server_id
@@ -139,7 +222,7 @@ class MsgMiddleware:
         # received expected message -> can be delivered
         elif expected_seq_num == data.sequence_number:
             await self._deliver_multicast_msg(data, addr)
-            expected_seq_num += + 1
+            expected_seq_num += 1
             # check if queued messages can now be delivered
             queue = self.server_queues.get(data.sender_uuid)
             while not queue.empty():
@@ -147,7 +230,7 @@ class MsgMiddleware:
                 if item.priority != expected_seq_num:
                     break
                 await self._deliver_multicast_msg(queue.get().item, addr)
-                expected_seq_num += + 1
+                expected_seq_num += 1
         # received newer message -> gap in the message arrival
         elif expected_seq_num < data.sequence_number:
             logging.warning("Queuing out-of-order multicast message with seq num %d from %s", data.sequence_number,

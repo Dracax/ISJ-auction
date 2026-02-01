@@ -32,6 +32,15 @@ def setup_logging(level=logging.INFO):
     # Add handler to root logger
     root_logger.addHandler(console_handler)
 
+    file_handler = logging.FileHandler(
+        'application.log',
+        mode='a',
+        encoding='utf-8'
+    )
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+
 
 if __name__ == '__main__':
     # Example usage

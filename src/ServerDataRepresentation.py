@@ -7,3 +7,4 @@ class ServerDataRepresentation:
     uuid: UUID
     ip: str
     port: int
+    tpc_port: int

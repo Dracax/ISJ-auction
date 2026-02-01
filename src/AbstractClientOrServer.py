@@ -41,7 +41,7 @@ class AbstractClientOrServer(ABC):
         interfaces = socket.gethostbyname_ex(socket.gethostname())[2]
         # Filter out VirtualBox/VMware interfaces (commonly 192.168.56.x or 192.168.99.x)
         for ip in interfaces:
-            if not ip.startswith('192.168.56.') and not ip.startswith('192.168.99.'):
+            if not ip.startswith('192.168.56.') and not ip.startswith('192.168.99.') and not ip.startswith('172.25.0'):
                 return ip
         return interfaces[0] if interfaces else '127.0.0.1'
 

@@ -131,7 +131,8 @@ class Socket(socket.socket):
 
         return None
 
-    def to_json(self, data_class: AbstractData) -> str:
+    @staticmethod
+    def to_json(data_class: AbstractData) -> str:
         dataclass = dataclasses.asdict(data_class)  # noqa
         return json.dumps(dataclass, default=lambda o: getattr(o, "value", str(o)))
 

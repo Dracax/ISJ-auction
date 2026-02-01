@@ -9,8 +9,6 @@ from asyncio import Event
 
 import logging_config
 from AbstractClientOrServer import AbstractClientOrServer
-from request.AbstractData.MulticastHeartbeat import MulticastHeartbeat
-from server.HeartbeatSenderModule import HeartbeatSenderModule
 from ServerDataRepresentation import ServerDataRepresentation
 from Socket import Socket
 from auction.AuctionManager import AuctionManager
@@ -24,6 +22,7 @@ from request.AbstractData.BullyAcceptVotingParticipationResponse import BullyAcc
 from request.AbstractData.BullyElectedLeaderRequest import BullyElectedLeaderRequest
 from request.AbstractData.FailStopMsg import FailStopMsg
 from request.AbstractData.MulticastGroupResponse import MulticastGroupResponse
+from request.AbstractData.MulticastHeartbeat import MulticastHeartbeat
 from request.AbstractData.MulticastNewAction import MulticastNewAction, MulticastNewBid
 from request.AbstractData.NotLeaderResponse import NotLeaderResponse
 from request.AbstractData.PlaceAuctionData import PlaceAuctionData
@@ -32,6 +31,7 @@ from request.AbstractData.ServerPlaceAuction import ServerPlaceAuction
 from request.AbstractData.SubscribeAuction import SubscribeAuction
 from request.AbstractData.SyncDataRequest import SyncDataRequest
 from request.AbstractData.UnicastVoteRequest import UnicastVoteRequest
+from server.HeartbeatSenderModule import HeartbeatSenderModule
 from server.MsgMiddleware import MsgMiddleware
 
 
@@ -62,6 +62,9 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         self.multicast_port: int = None
         self.multicast_address: tuple[str, int] = None
 
+        self.tpc_server = None
+        self.tcp_port: int = None
+
         # middleware
         self.middleware: MsgMiddleware = None
 
@@ -75,6 +78,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         self.response_election_event: Event = None
 
         self.auction_server_map: dict[int, ServerDataRepresentation] = {}
+        self.server_id_map: dict[uuid.UUID, ServerDataRepresentation] = {}
 
         # dict of auctions
         self.auctions: dict[int, Auction] = {}
@@ -82,7 +86,9 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         # Heartbeat
         self.heartbeat_sender_task = None
         self.heartbeat_listener_task = None
-        self._heartbeat_event = asyncio.Event()
+        self._heartbeat_event = None
+
+        self.test = None
 
     def run(self):
         # Configure logging for this process
@@ -100,13 +106,15 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         # Initialize asyncio events
         self.response_participation_event = asyncio.Event()
         self.response_election_event = asyncio.Event()
+        self._heartbeat_event = asyncio.Event()
 
         # unicast socket
         self.unicast_socket: Socket = self.create_unicast_socket()
         self.unicast_socket.bind((self.ip, self.UNICAST_PORT))
         self.port = self.unicast_socket.getsockname()[1]
         self.address = (self.ip, self.port)
-        self.server_group_view.append(ServerDataRepresentation(self.server_id, self.ip, self.port))
+        self.server_id_map[self.server_id] = ServerDataRepresentation(self.server_id, self.ip, self.port, self.tcp_port)
+        self.server_group_view.append(self.server_id_map[self.server_id])
         logging.info(f"Server bound to {self.ip}:{self.port}")
 
         # broadcast socket
@@ -114,19 +122,24 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         self.broadcast_socket: Socket = self.create_broadcast_socket()
         self.broadcast_socket.bind(ADDRESS)
 
-        # Run dynamic discovery in executor (blocking I/O) TODO:
-        test = asyncio.create_task(
-            self.dynamic_discovery_server_broadcast(
-                self.get_broadcast_address(),
-                self.SERVER_BROADCAST_PORT)
-        )
-
-        self.send_socket = Socket()
-
         self.middleware = MsgMiddleware(self.server_id, {
             self.unicast_socket: 'unicast',
             self.broadcast_socket: 'broadcast',
         })
+        self.tpc_server = await asyncio.start_server(self.middleware.handle_client, self.ip, 0)
+        self.tcp_port = self.tpc_server.sockets[0].getsockname()[1]
+        logging.info(f"TCP server bound to {self.ip}:{self.tcp_port}")
+        # self.middleware.start_tcp_server(self.tpc_server)
+
+        # Run dynamic discovery in executor (blocking I/O)
+        # self.test = asyncio.create_task(
+        #     self.dynamic_discovery_server_broadcast(
+        #         self.get_broadcast_address(),
+        #         self.SERVER_BROADCAST_PORT)
+        # )
+
+        self.send_socket = Socket()
+
         if not self.IS_PRODUCTION:
             self.middleware.add_server(uuid.UUID("2add30b2-5762-4046-bf81-0acdd8cbde2c"))  # for testing
 
@@ -135,7 +148,10 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         # Run middleware and message receiver concurrently
         await asyncio.gather(
             self.middleware.run(),
-            self.receive_message()
+            self.receive_message(),
+            self.dynamic_discovery_server_broadcast(
+                self.get_broadcast_address(),
+                self.SERVER_BROADCAST_PORT)
         )
 
     async def dynamic_discovery(self, data: BroadcastAnnounceRequest, addr: tuple[str, int]):
@@ -147,7 +163,9 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         elif self.multicast_socket and data.is_server:
             logging.info("New server joining: %s", data)
             self.middleware.add_server(data.uuid)
-            self.server_group_view.append(ServerDataRepresentation(data.uuid, data.ip, data.port))
+            self.server_id_map[data.uuid] = ServerDataRepresentation(data.uuid, data.ip, data.port, data.server_tcp_port)
+            self.server_group_view.append(self.server_id_map[data.uuid])
+
             self.send_socket.send_data(MulticastGroupResponse(self.MULTICAST_GROUP, self.multicast_port), data.request_address)
             await self.bully_algo()
 
@@ -158,10 +176,10 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         broadcast_socket = self.create_broadcast_socket()
         broadcast_socket.bind((self.ip, 0))
 
-        message = BroadcastAnnounceRequest(broadcast_socket.getsockname(), self.host, self.ip, self.port, self.server_id, True)
+        message = BroadcastAnnounceRequest(broadcast_socket.getsockname(), self.host, self.ip, self.port, self.server_id, True, self.tcp_port)
 
         data: MulticastGroupResponse | None
-        data = broadcast_socket.send_and_receive_data(message, (ip, port), MulticastGroupResponse, timeout=0.2, retries=2)
+        data = broadcast_socket.send_and_receive_data(message, (ip, port), MulticastGroupResponse, timeout=1, retries=2)
 
         if data:
             logging.info("Subscribing to existing multicast group at %s:%d", data.group_address, data.group_port)
@@ -175,7 +193,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             self.multicast_port = self.multicast_socket.getsockname()[1]
             self.multicast_address = (self.MULTICAST_GROUP, self.multicast_port)
             logging.info("Created multicast group at %s:%d", self.MULTICAST_GROUP, self.multicast_port)
-            self.leader = ServerDataRepresentation(self.server_id, self.ip, self.port)
+            self.leader = ServerDataRepresentation(self.server_id, self.ip, self.port, self.tcp_port)
 
         broadcast_socket.close()
         await self.middleware.add_socket(self.multicast_socket, 'multicast')
@@ -186,6 +204,9 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
     async def bully_algo(self):
         """Async bully algorithm implementation."""
         logging.info("** Starting bully algo **")
+        logging.info("** Starting bully algo **")
+        logging.info(f"** Event loop ID: {id(asyncio.get_running_loop())} **")
+        logging.info(f"** Event status before wait: {self.response_participation_event.is_set()} **")
 
         logging.info("** Own Server Id: %s **", self.server_id)
         if len(self.server_group_view) <= 0:
@@ -221,14 +242,14 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         logging.info("** No response received in timeout, proceeding with winning election. **")
         self.middleware.send_multicast(BullyElectedLeaderRequest("Host idk TODO", self.server_id, self.ip, self.port),
                                        (self.MULTICAST_GROUP, self.multicast_port))
-        self.leader = ServerDataRepresentation(self.server_id, self.ip, self.port)
+        self.leader = self.server_id_map[self.server_id]
 
         # Reset events for next time
         self.response_participation_event.clear()
         self.response_election_event.clear()
 
         # Start Heartbeat sender
-        await self.restart_heartbeat()
+        # await self.restart_heartbeat()
 
     async def restart_heartbeat(self):
         # Stop Heartbeat Sender task if one is running
@@ -254,22 +275,22 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             try:
                 await asyncio.wait_for(
                     self._heartbeat_event.wait(),
-                    timeout=10 # TODO: No hardcode
+                    timeout=10  # TODO: No hardcode
                 )
 
                 # Heartbeat received
                 logging.debug("heartbeat event received, resetting timeout")
                 self._heartbeat_event.clear()
-                #self.on_heartbeat_received()
+                # self.on_heartbeat_received()
 
             except asyncio.TimeoutError:
                 logging.warning("heartbeat event timed out")
                 self.middleware.send_multicast(
-                    FailStopMsg(self.leader.uuid, True, []), # TODO: Handle Open Transactions of leader
+                    FailStopMsg(self.leader.uuid, True, []),  # TODO: Handle Open Transactions of leader
                     (self.MULTICAST_GROUP, self.multicast_port))
                 # TODO: I do not receive the multicast myself, put the same logic here (remove leader from group view, start bully algo, ...)
                 # No heartbeat within timeout
-                #self.on_heartbeat_timeout()
+                # self.on_heartbeat_timeout()
                 break
 
     async def receive_message(self):
@@ -299,7 +320,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                             asyncio.create_task(self.bully_algo())
                         else:
                             logging.info("** Saving new Leader:" + str(data.uuid) + " **")
-                            temp = ServerDataRepresentation(data.uuid, data.ip, data.port)
+                            temp = self.server_id_map[self.server_id]
                             self.leader = temp
                             # Start Heartbeat listener
                             await self.restart_heartbeat()
@@ -313,7 +334,10 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                             asyncio.create_task(self.bully_algo())
                     case BullyAcceptVotingParticipationResponse():
                         logging.info("** Setting ok event participation to true **")
+                        logging.info(f"** Event loop ID: {id(asyncio.get_running_loop())} **")
+                        logging.info(f"** Event status BEFORE set: {self.response_participation_event.is_set()} **")
                         self.response_participation_event.set()
+                        logging.info(f"** Event status AFTER set: {self.response_participation_event.is_set()} **")
                     case RetrieveAuctions():
                         if self.is_leader():
                             self.send_socket.send_data(self.auction_manager.get_all_auctions(), addr)
@@ -328,7 +352,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                             logging.error("Wrong server received msg", exc_info=True)
                             continue
                         self.auction_manager.add_auction(data)
-                        self.auction_server_map[data.auction_id] = ServerDataRepresentation(self.server_id, self.ip, self.port)
+                        self.auction_server_map[data.auction_id] = self.server_id_map[self.server_id]
                         if not data.reassignment:
                             self.send_socket.send_data(AuctionPlaceResponse(True, data.auction_id, "sdfgsdfrgdfg"), data.client_address)
                         self.middleware.send_multicast(
@@ -339,9 +363,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                             (self.MULTICAST_GROUP, self.multicast_port))
                     case MulticastNewAction():
                         self.auction_manager.add_auction(data)
-                        self.auction_server_map[data.auction_id] = ServerDataRepresentation(data.processing_server_id,
-                                                                                            data.processing_server_ip,
-                                                                                            data.processing_server_port)
+                        self.auction_server_map[data.auction_id] = self.server_id_map[self.server_id]
                     case FailStopMsg():
                         await self.handle_fail_of_server(data)
                     case SyncDataRequest():
@@ -364,14 +386,15 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                 self.auction_server_map[auction_id] = server
                 break
         else:
-            self.auction_server_map[auction_id] = ServerDataRepresentation(self.server_id, self.ip, self.port)
+            self.auction_server_map[auction_id] = self.server_id_map[self.server_id]
 
         responsible_server = self.auction_server_map[auction_id]
-        self.send_socket.send_data(ServerPlaceAuction(auction_id,
-                                                      responsible_server.uuid, auction.title,
-                                                      auction.starting_bid, auction.starting_bid, auction.auction_owner, None, auction.owner_id,
-                                                      auction.request_address),
-                                   (responsible_server.ip, responsible_server.port))
+        await self.middleware.send_tcp_message(ServerPlaceAuction(auction_id,
+                                                                  responsible_server.uuid, auction.title,
+                                                                  auction.starting_bid, auction.starting_bid, auction.auction_owner, None,
+                                                                  auction.owner_id,
+                                                                  auction.request_address),
+                                               (responsible_server.ip, responsible_server.port))
 
     async def handle_bid(self, bid: AuctionBid):
         if bid.auction_id not in self.auction_server_map:
@@ -422,7 +445,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                                                    (server.ip, server.port))
                         break
                 else:
-                    self.auction_server_map[auction_id] = ServerDataRepresentation(self.server_id, self.ip, self.port)
+                    self.auction_server_map[auction_id] = self.server_id_map[self.server_id]
                     logging.info("Reassigning auction %d to self as no other servers available", auction_id)
 
 

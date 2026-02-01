@@ -13,3 +13,4 @@ class BroadcastAnnounceRequest(AbstractRequest):
     port: int
     uuid: UUID
     is_server: bool = False
+    server_tcp_port: int | None = None
