@@ -1,10 +1,10 @@
+import asyncio
 import logging
-import time
 
 from request.AbstractData.MulticastHeartbeat import MulticastHeartbeat
 
-class HeartbeatSenderModule:
 
+class HeartbeatSenderModule:
     # Sends a Heartbeat message every x seconds
     HEARTBEAT_INTERVAL = 2
     # After x seconds, get 1/x missable ACK noted in server_map - 2-3* Heartbeat Interval (tolerance for network jitter, ...)->4-6sec
@@ -26,7 +26,7 @@ class HeartbeatSenderModule:
         logging.info("Starting heartbeat sender...")
         while True:
             self.send_heartbeat()
-            time.sleep(self.HEARTBEAT_INTERVAL)
+            await asyncio.sleep(self.HEARTBEAT_INTERVAL)
 
     def send_heartbeat(self):
         logging.debug("Sending heartbeat #%d" % self.heartbeat_round)
