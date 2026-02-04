@@ -4,7 +4,7 @@ from client.Person import Person
 
 
 class AuctionShell(cmd.Cmd):
-    intro = "Auction Shell. Tippe 'help' oder '?'. Mit 'exit' beenden."
+    intro = "Auction Shell. Press 'help' or '?'. Close application with 'exit'."
     prompt = "auction> "
 
     def __init__(self):
@@ -13,11 +13,11 @@ class AuctionShell(cmd.Cmd):
         self.server = AuctionServer()
 
     def do_list(self, arg):
-        "Listet offene Items: list"
+        "List open items: list"
         self.server.retrieve_auctions()
 
     def do_bid(self, arg):
-        "Bietet auf ein Item: bid <item_id> <amount>"
+        "Bid on item: bid <item_id> <amount>"
         try:
             item_id_str, amount_str = arg.split()
             item_id = int(item_id_str)
@@ -27,8 +27,8 @@ class AuctionShell(cmd.Cmd):
         except ValueError:
             print("Usage: bid <item_id> <amount>")
 
-    def do_post(self, arg):
-        "Stellt ein neues Item ein: post <item_name> <starting_price>"
+    def do_place(self, arg):
+        "Place a new auction: place <item_name> <starting_price>"
         try:
             parts = arg.split()
             item_name = " ".join(parts[:-1])
@@ -49,7 +49,7 @@ class AuctionShell(cmd.Cmd):
     #        print("Usage: sub <auction_id>")
 
     def do_exit(self, arg):
-        "Beendet die Shell"
+        "Closes the shell"
         return True
 
     def start(self):

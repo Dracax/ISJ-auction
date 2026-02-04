@@ -91,6 +91,8 @@ class Socket(socket.socket):
     def send_data(self, data: AbstractData, address: tuple[str, int]):
         if not dataclasses.is_dataclass(data):
             raise TypeError("data must be a dataclass instance")
+        if address is None:
+            raise ValueError("send_data called with adress=None")
         logging.debug(f"Sending {data} to {address}")
         self.sendto(str.encode(self.to_json(data)), tuple(address))
 

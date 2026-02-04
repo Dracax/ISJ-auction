@@ -396,7 +396,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                         self.auction_manager.add_auction(data)
                         self.auction_server_map[data.auction_id] = self.server_id_map[self.server_id]
                         if not data.reassignment:
-                            self.send_socket.send_data(AuctionPlaceResponse(True, data.auction_id, "sdfgsdfrgdfg"), data.client_address)
+                            self.send_socket.send_data(AuctionPlaceResponse(True, data.auction_id, "Auction was placed"), data.client_address)
                         self.middleware.send_multicast(
                             MulticastNewAction(data.auction_id, data.processing_server_id,
                                                data.title, data.starting_bid, data.current_bid,
