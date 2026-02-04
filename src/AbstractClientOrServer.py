@@ -33,6 +33,8 @@ class AbstractClientOrServer(ABC):
 
         # Set outgoing interface for multicast
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(self.ip))
+        # was after a fix might be wrong
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
 
         return sock
 

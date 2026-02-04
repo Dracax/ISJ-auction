@@ -27,6 +27,7 @@ class DataType(Enum):
     MULTICAST_NEW_BID = "MulticastNewBid"
     MULTICAST_HEARTBEAT = "MulticastHeartbeat"
     MULTICAST_HEARTBEAT_ACK = "MulticastHeartbeatAck"
+    MULTICAST_JOIN_ANNOUNCE = "MulticastJoinAnnounce"
 
 
 @dataclass

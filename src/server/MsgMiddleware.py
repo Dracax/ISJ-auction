@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import socket
 from uuid import UUID
 
 from Socket import Socket
@@ -12,11 +11,13 @@ from server.UniquePriorityQueue import UniquePriorityQueue, PrioritizedItem
 
 
 class MsgMiddleware:
-    def __init__(self, server_id: UUID, sockets: dict[Socket, str], ):
+    def __init__(self, server_id: UUID, sockets: dict[Socket, str], multicast_socket: Socket, start_event: asyncio.Event):
         super(MsgMiddleware, self).__init__()
         self.server_id = server_id
         self.sockets = sockets
         self._running = False
+        self.multicast_socket = multicast_socket
+        self.start_event = start_event
 
         self.tcp_server_task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
@@ -29,6 +30,7 @@ class MsgMiddleware:
 
         # Queue for thread communication
         self.message_queue: asyncio.Queue[tuple[AbstractData, tuple[str, int]]] = asyncio.Queue()
+        self.outgoing_multicast_queue: asyncio.Queue[tuple[AbstractMulticastData, tuple[str, int]]] = asyncio.Queue()
         self._socket_tasks: dict[Socket, asyncio.Task] = {}
 
         # testing
@@ -51,8 +53,11 @@ class MsgMiddleware:
                 for sock, msg_type in self.sockets.items():
                     self._start_socket_task(sock, msg_type)
 
+            outgoing_task = asyncio.create_task(self._process_outgoing_messages())
+            self.start_event.set()
             while self._running:
                 await asyncio.sleep(1.0)
+            outgoing_task.cancel()
         except Exception as e:
             logging.error("MsgMiddleware run error: %s", e)
             await self.stop()
@@ -133,8 +138,8 @@ class MsgMiddleware:
             writer.close()
             await writer.wait_closed()
 
-        except ConnectionRefusedError:
-            logging.warning("Connection refused from other server ")
+        except ConnectionRefusedError as e:
+            logging.warning(f"Connection refused from other server {e}")
             return False
         return True
 
@@ -147,7 +152,6 @@ class MsgMiddleware:
             try:
                 # Run blocking receive in executor
                 data, addr = await loop.run_in_executor(None, sock.receive_data)
-                logging.debug(f"[MsgMiddleware] Received {type(data).__name__} from {addr} on {sock} socket")
                 if data and handler:
                     await handler(data, addr)
             except ConnectionResetError as e:
@@ -178,17 +182,37 @@ class MsgMiddleware:
         #         if handler:
         #             handler(data, addr)  # noqa
 
+    async def _process_outgoing_messages(self):
+        """Process outgoing multicast messages from queue."""
+        while self._running:
+            try:
+                data, addr = await self.outgoing_multicast_queue.get()
+                self._send_multicast_internal(data, addr)
+            except Exception as e:
+                logging.error("Error processing outgoing message: %s", e)
+
     def send_multicast(self, data: AbstractMulticastData, addr: tuple[str, int]):
+        """Thread-safe method to queue multicast messages."""
+        try:
+            self.outgoing_multicast_queue.put_nowait((data, addr))
+        except asyncio.QueueFull:
+            logging.error("Outgoing multicast queue is full!")
+        return
+        # was a version that worked be suddently not anymore
+        # any_socket = Socket()
+        # MULTICAST_TTL = 2
+        # any_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+        # any_socket.send_data(data, addr)
+        # any_socket.close()
+
+    def _send_multicast_internal(self, data: AbstractMulticastData, addr: tuple[str, int]):
+        """Internal method that actually sends the multicast message."""
         data.sender_uuid = self.server_id
         data.sequence_number = self.current_sequence_number
         self.current_sequence_number += 1
         self.sender_cache[data.sequence_number] = data
 
-        any_socket = Socket()
-        MULTICAST_TTL = 2
-        any_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, MULTICAST_TTL)
-        any_socket.send_data(data, addr)
-        any_socket.close()
+        self.multicast_socket.send_data(data, addr)
 
     def _send_nack_request(self, nack_request: AbstractMulticastData, addr: tuple[str, int]):
         nack_request.sender_uuid = self.server_id
@@ -222,15 +246,18 @@ class MsgMiddleware:
         # received expected message -> can be delivered
         elif expected_seq_num == data.sequence_number:
             await self._deliver_multicast_msg(data, addr)
-            expected_seq_num += 1
             # check if queued messages can now be delivered
             queue = self.server_queues.get(data.sender_uuid)
             while not queue.empty():
+                current_expected = self.server_sequence_numbers.get(data.sender_uuid) + 1
                 item: PrioritizedItem = queue.peek()
-                if item.priority != expected_seq_num:
+
+                if item.priority != current_expected:
+                    logging.debug("Queue head seq %d != expected %d, stopping delivery",
+                                  item.priority, current_expected)
                     break
-                await self._deliver_multicast_msg(queue.get().item, addr)
-                expected_seq_num += 1
+                queue.get()
+                await self._deliver_multicast_msg(item.item, addr)
         # received newer message -> gap in the message arrival
         elif expected_seq_num < data.sequence_number:
             logging.warning("Queuing out-of-order multicast message with seq num %d from %s", data.sequence_number,

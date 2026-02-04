@@ -8,3 +8,4 @@ from request.AbstractData.AbstractData import AbstractData, register_data_type, 
 class MulticastGroupResponse(AbstractData):
     group_address: str
     group_port: int
+    group_view: list[dict]

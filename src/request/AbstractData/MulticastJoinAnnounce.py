@@ -5,11 +5,11 @@ from request.AbstractData.AbstractData import register_data_type, DataType
 from request.AbstractData.AbstractMulticastData import AbstractMulticastData
 
 
-@register_data_type(DataType.BULLY_ELECTED_LEADER_REQUEST)
+@register_data_type(DataType.MULTICAST_JOIN_ANNOUNCE)
 @dataclass
-class BullyElectedLeaderRequest(AbstractMulticastData):
+class MulticastJoinAnnounce(AbstractMulticastData):
     host: str
-    uuid: UUID
     ip: str
     port: int
-    tpc_port: int
+    uuid: UUID
+    server_tcp_port: int
