@@ -7,7 +7,8 @@ from request.AbstractData.MulticastHeartbeatAck import MulticastHeartbeatAck
 
 class HeartbeatSenderModule:
     # Sends a Heartbeat message every x seconds
-    HEARTBEAT_INTERVAL = 2
+    HEARTBEAT_INTERVAL = 5
+    LEADER_TIMEOUT = 5
     # After x seconds, get 1/x missable ACK noted in server_map - 2-3* Heartbeat Interval (tolerance for network jitter, ...)->4-6sec
     TIMEOUT = 2
     # After missing this amount of ACK, consequences like removing the Server from group
@@ -39,7 +40,7 @@ class HeartbeatSenderModule:
         while True:
             self.send_heartbeat()
             await asyncio.sleep(self.HEARTBEAT_INTERVAL)
-            self.check_received()
+            await self.check_received()
             self.received_acks = set()
 
     def send_heartbeat(self):
@@ -52,10 +53,15 @@ class HeartbeatSenderModule:
         logging.debug(f"Received ack: {data.server}")
         self.received_acks.add(data.server)
 
-    def check_received(self):
+    async def check_received(self):
         logging.debug("Checking received acks...")
         missing_ids = set(self.expected_acks) - set(self.received_acks)
         for server in missing_ids:
             # Increment the "missed" field
             logging.debug("Missing ack for server %d" % server)
             self.server_map[server] += 1
+            if self.server_map[server] >= self.MISSABLE_ACK_THRESHOLD:
+                logging.warning("Server %d has missed %d heartbeats, removing from group" % (
+                    server, self.server_map[server]))
+                self.expected_acks.remove(server)
+                await self.server.on_heartbeat_timeout(server, False)

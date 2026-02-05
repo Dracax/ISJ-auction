@@ -312,7 +312,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                 if not self._heartbeat_event.is_set():
                     await asyncio.wait_for(
                         self._heartbeat_event.wait(),
-                        timeout=10  # TODO: No hardcode
+                        timeout=HeartbeatSenderModule.LEADER_TIMEOUT  # TODO: No hardcode
                     )
 
                 # Heartbeat received
@@ -323,21 +323,21 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
             except asyncio.TimeoutError:
                 logging.warning("heartbeat event timed out")
-                msg = FailStopMsg(self.leader.uuid, True, [])  # TODO: Handle Open Transactions of leader
-                self.middleware.send_multicast(
-                    msg,  # TODO: Handle Open Transactions of leader
-                    (self.MULTICAST_GROUP, self.multicast_port))
 
                 # TODO: I do not receive the multicast myself, put the same logic here (remove leader from group view, start bully algo, ...)
                 # No heartbeat within timeout
-                await self.on_heartbeat_timeout(msg)
+                await self.on_heartbeat_timeout(self.leader.uuid, True)
                 break
             except Exception as e:
                 logging.error("Error in heartbeat listener: %s", e, exc_info=True)
                 break
 
-    async def on_heartbeat_timeout(self, fail_msg: FailStopMsg):
-        await self.handle_fail_of_server(fail_msg)
+    async def on_heartbeat_timeout(self, crashed_server_id: uuid.UUID, is_leader: bool):
+        msg = FailStopMsg(crashed_server_id, is_leader, [])
+        # TODO: Handle Open Transactions of leader
+        self.middleware.send_multicast(msg, self.multicast_address)
+
+        await self.handle_fail_of_server(msg)
 
     async def receive_message(self):
         try:
