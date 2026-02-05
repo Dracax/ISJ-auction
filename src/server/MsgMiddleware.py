@@ -317,9 +317,18 @@ class MsgMiddleware:
                     del self._socket_tasks[sock]
                 logging.info("Socket removed")
 
-    async def stop(self):
+    def stop(self):
         """Stop all socket tasks."""
         self._running = False
         for task in self._socket_tasks.values():
             task.cancel()
         self._socket_tasks.clear()
+        if self.tcp_server_task:
+            self.tcp_server_task.cancel()
+            self.tcp_server_task = None
+
+        for sock in self.sockets:
+            sock.close()
+        self.sockets.clear()
+
+        logging.info("Middleware stopped and all sockets closed")

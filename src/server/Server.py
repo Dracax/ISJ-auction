@@ -1,9 +1,9 @@
 import asyncio
+import copy
 import logging
 import multiprocessing
 import os
 import socket
-import sys
 import uuid
 from asyncio import Event
 
@@ -204,6 +204,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             self.multicast_port = data.group_port
             self.multicast_address = (data.group_address, data.group_port)
             self.server_group_view.extend([ServerDataRepresentation.of(x) for x in data.group_view])
+            self.server_id_map.update({x.uuid: x for x in self.server_group_view})
         else:
             logging.info("No broadcast response received, creating new multicast group")
             self.multicast_socket = self.setup_multicast_socket(self.MULTICAST_GROUP,
@@ -324,13 +325,17 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
             except asyncio.TimeoutError:
                 logging.warning("heartbeat event timed out")
+                msg = FailStopMsg(self.leader.uuid, True, [])  # TODO: Handle Open Transactions of leader
                 self.middleware.send_multicast(
-                    FailStopMsg(self.leader.uuid, True, []),  # TODO: Handle Open Transactions of leader
+                    msg,  # TODO: Handle Open Transactions of leader
                     (self.MULTICAST_GROUP, self.multicast_port))
                 # TODO: I do not receive the multicast myself, put the same logic here (remove leader from group view, start bully algo, ...)
                 # No heartbeat within timeout
-                # self.on_heartbeat_timeout()
+                await self.on_heartbeat_timeout(msg)
                 break
+
+    async def on_heartbeat_timeout(self, fail_msg: FailStopMsg):
+        await self.handle_fail_of_server(fail_msg)
 
     async def receive_message(self):
         try:
@@ -390,22 +395,10 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                     case PlaceAuctionData():
                         await self.place_auction(data)
                     case ServerPlaceAuction():
-                        if data.processing_server_id != self.server_id:
-                            logging.error("Wrong server received msg", exc_info=True)
-                            continue
-                        self.auction_manager.add_auction(data)
-                        self.auction_server_map[data.auction_id] = self.server_id_map[self.server_id]
-                        if not data.reassignment:
-                            self.send_socket.send_data(AuctionPlaceResponse(True, data.auction_id, "Auction was placed"), data.client_address)
-                        self.middleware.send_multicast(
-                            MulticastNewAction(data.auction_id, data.processing_server_id,
-                                               data.title, data.starting_bid, data.current_bid,
-                                               data.auction_owner, data.current_bidder, data.owner_id, data.client_address,
-                                               processing_server_ip=self.ip, processing_server_port=self.port),
-                            (self.MULTICAST_GROUP, self.multicast_port))
+                        self.place_server_auction(data)
                     case MulticastNewAction():
                         self.auction_manager.add_auction(data)
-                        self.auction_server_map[data.auction_id] = self.server_id_map[self.server_id]
+                        self.auction_server_map[data.auction_id] = self.server_id_map[data.processing_server_id]
                     case FailStopMsg():
                         await self.handle_fail_of_server(data)
                     case SyncDataRequest():
@@ -427,25 +420,47 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         except Exception as e:
             logging.error("Error in receive_message: %s", e, exc_info=True)
             self.middleware.send_multicast(FailStopMsg(self.server_id, self.is_leader(), []), self.multicast_address)
-            self.kill()
+            await self.stop()
 
     async def place_auction(self, auction: PlaceAuctionData):
         auction_servers = set(self.auction_server_map.values())
         auction_id = self.auction_manager.get_next_auction_id()
         for server in self.server_group_view:
             if server.uuid != self.server_id and server not in auction_servers:
-                self.auction_server_map[auction_id] = server
-                break
+                response = await self.middleware.send_tcp_message(
+                    ServerPlaceAuction(auction_id,
+                                       server.uuid, auction.title,
+                                       auction.starting_bid, auction.starting_bid,
+                                       auction.auction_owner, None,
+                                       auction.owner_id,
+                                       auction.request_address),
+                    server.tcp_address)
+                if response:
+                    self.auction_server_map[auction_id] = copy.copy(server)
+                    break
         else:
             self.auction_server_map[auction_id] = self.server_id_map[self.server_id]
+            self.place_server_auction(ServerPlaceAuction(auction_id,
+                                                         self.server_id, auction.title,
+                                                         auction.starting_bid, auction.starting_bid,
+                                                         auction.auction_owner, None,
+                                                         auction.owner_id,
+                                                         auction.request_address))
 
-        responsible_server = self.auction_server_map[auction_id]
-        await self.middleware.send_tcp_message(ServerPlaceAuction(auction_id,
-                                                                  responsible_server.uuid, auction.title,
-                                                                  auction.starting_bid, auction.starting_bid, auction.auction_owner, None,
-                                                                  auction.owner_id,
-                                                                  auction.request_address),
-                                               responsible_server.tcp_address)
+    def place_server_auction(self, data: ServerPlaceAuction):
+        if data.processing_server_id != self.server_id:
+            logging.error("Wrong server received msg", exc_info=True)
+            return
+        self.auction_manager.add_auction(data)
+        self.auction_server_map[data.auction_id] = self.server_id_map[self.server_id]
+        if not data.reassignment:
+            self.send_socket.send_data(AuctionPlaceResponse(True, data.auction_id, "Auction was placed"), data.client_address)
+        self.middleware.send_multicast(
+            MulticastNewAction(data.auction_id, data.processing_server_id,
+                               data.title, data.starting_bid, data.current_bid,
+                               data.auction_owner, data.current_bidder, data.owner_id, data.client_address,
+                               processing_server_ip=self.ip, processing_server_port=self.port),
+            (self.MULTICAST_GROUP, self.multicast_port))
 
     async def handle_bid(self, bid: AuctionBid):
         if bid.auction_id not in self.auction_server_map:
@@ -468,7 +483,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
         # If the apparently failed server is myself TODO: Instead of kms, try to re-join the group
         if data.stop_id == self.server_id:
-            sys.exit()
+            await self.stop()
 
         self.server_group_view = [server for server in self.server_group_view if server.uuid != data.stop_id]
 
@@ -507,6 +522,17 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
         self.response_participation_event.clear()
         self.response_participation_event.clear()
+
+    async def stop(self):
+        # Cancel all tasks in the current event loop
+        await asyncio.sleep(0.1)  # Give some time for the message to be sent before shutting down
+        self.middleware.stop()
+        loop = asyncio.get_running_loop()
+        tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
+        for task in tasks:
+            task.cancel()
+
+        os._exit(1)
 
 
 async def main():
