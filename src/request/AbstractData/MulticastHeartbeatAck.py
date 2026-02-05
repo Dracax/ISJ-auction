@@ -1,11 +1,11 @@
+import uuid
 from dataclasses import dataclass
 
-from ServerDataRepresentation import ServerDataRepresentation
-from request.AbstractData.AbstractData import register_data_type, DataType
-from request.AbstractData.AbstractMulticastData import AbstractMulticastData
+from request.AbstractData.AbstractData import register_data_type, DataType, AbstractData
+
 
 @register_data_type(DataType.MULTICAST_HEARTBEAT_ACK)
 @dataclass
-class MulticastHeartbeatAck(AbstractMulticastData):
-    server: ServerDataRepresentation
+class MulticastHeartbeatAck(AbstractData):
+    server: uuid.UUID
     heartbeat_round: int

@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from request.AbstractData.MulticastHeartbeat import MulticastHeartbeat
+from request.AbstractData.MulticastHeartbeatAck import MulticastHeartbeatAck
 
 
 class HeartbeatSenderModule:
@@ -13,20 +14,16 @@ class HeartbeatSenderModule:
     MISSABLE_ACK_THRESHOLD = 3
 
     def __init__(self, server):
-        #threading.Thread.__init__(self, daemon=True)
 
         # Keeps track of a Server and it's missed heartbeats
         self.server = server
         self.server_map = {
-            current_server: {
-                "data": current_server,
-                "missed": 0,
-            }
+            current_server.uuid: 0
             for current_server in self.server.server_group_view
         }
         self.heartbeat_round = 0
-        self.expectedAcks = set(self.server_map)
-        self.receivedAcks = set()
+        self.expected_acks = {x.uuid for x in self.server.server_group_view if x.uuid != self.server.server_id}
+        self.received_acks = set()
 
     """
     1. Send Heartbeat
@@ -36,28 +33,29 @@ class HeartbeatSenderModule:
     4. Reset List of received ACKs
     4.1 GOTO 1
     """
+
     async def run(self):
         logging.info("Starting heartbeat sender...")
         while True:
             self.send_heartbeat()
             await asyncio.sleep(self.HEARTBEAT_INTERVAL)
-            self.receivedAcks = set()
+            self.check_received()
+            self.received_acks = set()
 
-# TODO: HIER WURDE ASYNC DAZUGEPACKT, MACHT DAS OBEN MAYBE KAPUTT?
-    async def send_heartbeat(self):
+    def send_heartbeat(self):
         logging.debug("Sending heartbeat #%d" % self.heartbeat_round)
         self.heartbeat_round += 1
         self.server.middleware.send_multicast(MulticastHeartbeat(self.heartbeat_round, self.server.ip, self.server.port),
-                                       (self.server.MULTICAST_GROUP, self.server.multicast_port))
+                                              (self.server.MULTICAST_GROUP, self.server.multicast_port))
 
-    async def handle_ack(self, data):
-        logging.debug("Received ack: " + data)
-        self.receivedAcks.add(data.server)
+    def handle_ack(self, data: MulticastHeartbeatAck):
+        logging.debug(f"Received ack: {data.server}")
+        self.received_acks.add(data.server)
 
-    async def check_received(self):
+    def check_received(self):
         logging.debug("Checking received acks...")
-        missing_ids = set(self.server_map) - set(self.receivedAcks)
+        missing_ids = set(self.expected_acks) - set(self.received_acks)
         for server in missing_ids:
             # Increment the "missed" field
-            logging.debug("Missing ack for server #%d" % server)
-            self.server_map[server]["missed"] += 1
+            logging.debug("Missing ack for server %d" % server)
+            self.server_map[server] += 1
