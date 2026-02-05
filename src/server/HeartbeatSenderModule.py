@@ -16,21 +16,48 @@ class HeartbeatSenderModule:
         #threading.Thread.__init__(self, daemon=True)
 
         # Keeps track of a Server and it's missed heartbeats
-        # server_list = list[tuple[ServerDataRepresentation, int]]
         self.server = server
-        self.server_map = [(server_data, 0) for server_data in self.server.server_group_view]
+        self.server_map = {
+            current_server: {
+                "data": current_server,
+                "missed": 0,
+            }
+            for current_server in self.server.server_group_view
+        }
         self.heartbeat_round = 0
-        #self._stop_event = threading.Event()
+        self.expectedAcks = set(self.server_map)
+        self.receivedAcks = set()
 
+    """
+    1. Send Heartbeat
+    2. Wait for x seconds (Heartbeat Interval)
+    3. Check the set of received ACKs
+    3.1 If a server did not send an ACK -> Mark server
+    4. Reset List of received ACKs
+    4.1 GOTO 1
+    """
     async def run(self):
         logging.info("Starting heartbeat sender...")
         while True:
             self.send_heartbeat()
             await asyncio.sleep(self.HEARTBEAT_INTERVAL)
+            self.receivedAcks = set()
 
-    def send_heartbeat(self):
+# TODO: HIER WURDE ASYNC DAZUGEPACKT, MACHT DAS OBEN MAYBE KAPUTT?
+    async def send_heartbeat(self):
         logging.debug("Sending heartbeat #%d" % self.heartbeat_round)
-        #for server in self.server_map.values():
         self.heartbeat_round += 1
         self.server.middleware.send_multicast(MulticastHeartbeat(self.heartbeat_round, self.server.ip, self.server.port),
                                        (self.server.MULTICAST_GROUP, self.server.multicast_port))
+
+    async def handle_ack(self, data):
+        logging.debug("Received ack: " + data)
+        self.receivedAcks.add(data.server)
+
+    async def check_received(self):
+        logging.debug("Checking received acks...")
+        missing_ids = set(self.server_map) - set(self.receivedAcks)
+        for server in missing_ids:
+            # Increment the "missed" field
+            logging.debug("Missing ack for server #%d" % server)
+            self.server_map[server]["missed"] += 1

@@ -9,6 +9,9 @@ from asyncio import Event
 
 import logging_config
 from AbstractClientOrServer import AbstractClientOrServer
+from request.AbstractData.MulticastHeartbeat import MulticastHeartbeat
+from request.AbstractData.MulticastHeartbeatAck import MulticastHeartbeatAck
+from server.HeartbeatSenderModule import HeartbeatSenderModule
 from ServerDataRepresentation import ServerDataRepresentation
 from Socket import Socket
 from auction.AuctionManager import AuctionManager
@@ -88,6 +91,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
         # Heartbeat
         self.heartbeat_sender_task = None
+        self.heartbeat_sender: HeartbeatSenderModule = None
         self.heartbeat_listener_task = None
         self._heartbeat_event = None
 
@@ -227,7 +231,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         self.response_election_event.clear()
 
         logging.info("** Own Server Id: %s **", self.server_id)
-        if len(self.server_group_view) <= 0:
+        if len(self.server_group_view) <= 0 or (len(self.server_group_view) <= 1 and self.server_group_view[0].uuid == self.server_id):
             logging.info("** Stopping bully algo due to empty server list **")
             return
         send_msg = False
@@ -319,9 +323,10 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                 )
 
                 # Heartbeat received
-                logging.debug("heartbeat event received, resetting timeout")
+                logging.debug("heartbeat event received, resetting timeout and sending ACK")
                 self._heartbeat_event.clear()
-                # self.on_heartbeat_received()
+                # Send Unicast ACK to Leaders Heartbeat sender
+                #self.unicast_socket.send_data(MulticastHeartbeatAck(ServerDataRepresentation(self.server_id, self.ip, self.port), 0), (self.leader.ip, self.leader.port))
 
             except asyncio.TimeoutError:
                 logging.warning("heartbeat event timed out")
@@ -329,6 +334,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                 self.middleware.send_multicast(
                     msg,  # TODO: Handle Open Transactions of leader
                     (self.MULTICAST_GROUP, self.multicast_port))
+
                 # TODO: I do not receive the multicast myself, put the same logic here (remove leader from group view, start bully algo, ...)
                 # No heartbeat within timeout
                 await self.on_heartbeat_timeout(msg)
@@ -375,6 +381,8 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                     case MulticastHeartbeat():
                         logging.info("Received Heartbeat - Setting event")
                         self._heartbeat_event.set()
+                    case MulticastHeartbeatAck():
+                        await self.heartbeat_sender.handle_ack(data)
                     case UnicastVoteRequest():  # Is called by a Server which is performing bully Algo. If their ID is lower, send back a participation message (makes them stop bully for a timeout period)
                         if data.uuid < self.server_id:
                             self.unicast_socket.send_data(BullyAcceptVotingParticipationResponse("idk TODO", self.server_id, self.ip, self.port),
@@ -544,7 +552,7 @@ async def main():
         for i in range(3):
             server = Server()
             server.start()
-            await asyncio.sleep(1)
+            await asyncio.sleep(2)
             servers.append(server)
 
         # Wait for all servers in executor since join() is blocking
