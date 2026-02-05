@@ -48,6 +48,14 @@ class AuctionServer:
             else: 
                 print('Dynamic discovery')
                 self.client._start_dynamic_discovery(self.client.get_broadcast_address(), 8000)
+                self.client.client_socket.send_data(request, self.client.server_to_talk_to)
+                msg_3 = self.client.receive_only(timeout=20)
+                if msg_3:
+                    self.handle_messages(msg_3)
+                else:
+                    print("Unable to reach servers.")
+
+
 
 
 
@@ -81,6 +89,12 @@ class AuctionServer:
             else:
                 print("Dynamic discovery")
                 self.client._start_dynamic_discovery(self.client.get_broadcast_address(), 80000)
+                self.client.client_socket.send_data(new_auction, self.client.server_to_talk_to)
+                msg_3 = self.client.receive_only(timeout=20)
+                if msg_3:
+                    self.handle_messages(msg_3)
+                else:
+                    print("Unable to reach servers.")
                   
         
 
@@ -109,6 +123,12 @@ class AuctionServer:
             else: 
                 print('Nothing received, starting Dynamic discovery')
                 self.client._start_dynamic_discovery(self.client.get_broadcast_address(), 8000)
+                self.client.client_socket.send_data(bid, self.client.server_to_talk_to)
+                msg_3 = self.client.receive_only(timeout=20)
+                if msg_3:
+                    self.handle_messages(msg_3)
+                else:
+                    print("Unable to reach servers.")
 
     
     #def subscribe_2_auction(self, auction_id: int):
@@ -125,7 +145,9 @@ class AuctionServer:
                 print(f"Bid {response.bid_id} rejected: {response.message}")
                 return False
         elif isinstance(response, RetrieveAuctionsResponse):
-            print(response.auctions)
+            print('Currently ongoing auctions:')
+            for auction in response.auctions:
+                print(f"Auction_Id: {auction['auction_id']}, Item: {auction['item_name']}, Current Price: {auction['current_price']}")
             return False
         elif isinstance(response, NotLeaderResponse):
             print("Path taken")
