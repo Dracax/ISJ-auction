@@ -126,6 +126,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         self.broadcast_socket: Socket = self.create_broadcast_socket()
         self.broadcast_socket.bind(ADDRESS)
 
+        self.auction_manager = AuctionManager()
         await self.dynamic_discovery_server_broadcast(
             self.get_broadcast_address(),
             self.SERVER_BROADCAST_PORT)
@@ -152,7 +153,6 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         if not self.IS_PRODUCTION:
             self.middleware.add_server(uuid.UUID("2add30b2-5762-4046-bf81-0acdd8cbde2c"))  # for testing
 
-        self.auction_manager = AuctionManager()
         asyncio.create_task(self.announce_server_start())
         # Run middleware and message receiver concurrently
         await asyncio.gather(
@@ -178,7 +178,11 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             logging.info("New server joining: %s", data)
             self.middleware.add_server(data.uuid)
 
-            self.send_socket.send_data(MulticastGroupResponse(self.MULTICAST_GROUP, self.multicast_port, self.server_group_view),
+            self.send_socket.send_data(MulticastGroupResponse(self.MULTICAST_GROUP, self.multicast_port, self.server_group_view,
+                                                              [ServerPlaceAuction(x.auction_id, self.auction_server_map[x.auction_id].uuid,
+                                                                                  x.item_name, x.starting_price, x.current_price, x.item_owner,
+                                                                                  x.current_bidder, x.item_owner, x.client_address, False) for x in
+                                                               self.auction_manager.get_all_auctions().auctions]),
                                        data.request_address)
 
     async def dynamic_discovery_server_broadcast(self, ip, port):
@@ -200,6 +204,9 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             self.multicast_address = (data.group_address, data.group_port)
             self.server_group_view.extend([ServerDataRepresentation.of(x) for x in data.group_view])
             self.server_id_map.update({x.uuid: x for x in self.server_group_view})
+            for auction in data.auctions:
+                del auction["data_type"]
+                self.auction_manager.add_auction(ServerPlaceAuction(**auction))
         else:
             logging.info("No broadcast response received, creating new multicast group")
             self.multicast_socket = self.setup_multicast_socket(self.MULTICAST_GROUP,
@@ -545,7 +552,7 @@ async def main():
     import random
     await asyncio.sleep(random.randint(1, 5) * 0.5)
     try:
-        for i in range(3):
+        for i in range(1):
             server = Server()
             server.start()
             await asyncio.sleep(2)

@@ -9,3 +9,4 @@ class MulticastGroupResponse(AbstractData):
     group_address: str
     group_port: int
     group_view: list[dict]
+    auctions: list[dict]
