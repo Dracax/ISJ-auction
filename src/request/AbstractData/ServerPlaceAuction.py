@@ -17,3 +17,4 @@ class ServerPlaceAuction(AbstractData):
     owner_id: UUID
     client_address: tuple[str, int]
     reassignment: bool = False
+    response_address: tuple[str, int] | None = None

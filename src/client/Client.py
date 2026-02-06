@@ -2,6 +2,7 @@ import logging
 import socket
 import threading
 import uuid
+from queue import Queue
 
 import logging_config
 from AbstractClientOrServer import AbstractClientOrServer
@@ -9,18 +10,16 @@ from Socket import Socket
 from request.AbstractData.AbstractData import AbstractData
 from request.AbstractData.BroadcastAnnounceRequest import BroadcastAnnounceRequest
 from request.AbstractData.BroadcastAnnounceResponse import BroadcastAnnounceResponse
-from request.AbstractRequest import AbstractRequest
-from request.AbstractData.NotLeaderResponse import NotLeaderResponse
 
 
 class Client(threading.Thread, AbstractClientOrServer):
     def __init__(self):
         super(Client, self).__init__()
-        
+
         self.client_socket: Socket | None = None
-        #Socket not used for sending/ listening.
+        self.notification_socket: Socket | None = None
+        # Socket not used for sending/ listening.
         self.send_socket: Socket = None
-    
 
         self.host = socket.gethostname()
         self.ip = self.get_local_ip()
@@ -28,6 +27,7 @@ class Client(threading.Thread, AbstractClientOrServer):
         self.server_list: list[tuple[str, int]] = []
         self.server_to_talk_to: tuple[str, int] | None = None
 
+        self.incoming_msg_queue: Queue[tuple[AbstractData, tuple[str, int]]] = Queue()
         self.client_id = uuid.uuid4()
 
     def run(self):
@@ -36,17 +36,20 @@ class Client(threading.Thread, AbstractClientOrServer):
         self.client_socket = Socket()
         self.client_socket.bind((self.ip, 0))
 
-        self.client_socket.settimeout(5)  # For testing very high timeout
+        self.notification_socket = Socket()
+        self.notification_socket.bind((self.ip, 0))
 
         self.send_socket = Socket()
 
         self.port = self.client_socket.getsockname()[1]
         self.address = (self.ip, self.port)
+        self.notification_address = (self.ip, self.notification_socket.getsockname()[1])
         logging.info(f"Client bound to {self.ip}:{self.port}")
 
         thread = threading.Thread(target=self._start_dynamic_discovery, args=(self.get_broadcast_address(), 8000),
                                   daemon=True)
         thread.start()
+        threading.Thread(target=self.wait_for_notifications, daemon=True).start()
         thread.join()
 
         self.client_socket.sendto("Hello Server".encode(), self.server_to_talk_to)  # only for testing
@@ -70,58 +73,12 @@ class Client(threading.Thread, AbstractClientOrServer):
 
         broadcast_socket.close()
 
-    def send_get_request[T: AbstractData](self, request: AbstractRequest, response_type: type[T]) -> T | None:
-        if not self.client_socket or not self.server_to_talk_to:
-            logging.error("Client socket or server address not set")
-            return None
+    def wait_for_notifications(self):
+        while True:
+            data, addr = self.notification_socket.receive_data()
+            logging.info("Received notification from %s: %s", addr, data)
+            self.incoming_msg_queue.put((data, addr))
 
-        request.request_address = self.client_socket.getsockname()
-
-        response = self.send_and_receive_data(request, response_type)
-
-        if response:
-            logging.info("Received response: %s", response)
-        else:
-            logging.warning("No response received for request: %s", request)
-
-        return response
-
-    def send_and_receive_data[T: AbstractData](
-            self,
-            data: AbstractRequest,
-            response_type: type[T],
-            retries: int = 0
-    ) -> T | None:
-
-        is_success = False
-        data_received = None
-        for server in [self.server_to_talk_to] + self.server_list:
-            self.client_socket.send_data(data, server)
-            try:
-                data_received, _, = self.client_socket.receive_data()
-                if data_received:
-                    is_success = True
-                    break
-            except socket.timeout:
-                logging.warning("Socket timed out, trying new ip/port")
-
-        if data_received:
-            return data_received
-
-        if not is_success or data_received is None:
-            self._start_dynamic_discovery(self.get_broadcast_address(), 8000)
-
-        try:
-            self.client_socket.send_data(data, self.server_to_talk_to)
-            data_received, address, = self.client_socket.receive_data()
-        except socket.timeout:
-            logging.warning("Socket timed out on retry after rediscovery")
-            logging.info("Try again later..")
-            return None
-        if data_received:
-            return data_received
-
-        return None
     def receive_only(self, timeout: float | None = None):
         """
         Blocks until data is received on the client socket.

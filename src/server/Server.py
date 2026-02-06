@@ -15,6 +15,7 @@ from auction.AuctionManager import AuctionManager
 from auction.AuctionModel import Auction
 from request.AbstractData.AbstractClientRequest import AbstractClientRequest
 from request.AbstractData.AuctionBid import AuctionBid
+from request.AbstractData.AuctionBidInformation import AuctionBidInformation
 from request.AbstractData.AuctionBidResponse import AuctionPlaceResponse, AuctionBidResponse
 from request.AbstractData.BroadcastAnnounceRequest import BroadcastAnnounceRequest
 from request.AbstractData.BroadcastAnnounceResponse import BroadcastAnnounceResponse
@@ -179,7 +180,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             self.middleware.add_server(data.uuid)
 
             self.send_socket.send_data(MulticastGroupResponse(self.MULTICAST_GROUP, self.multicast_port, self.server_group_view,
-                                                              [ServerPlaceAuction(x.auction_id, self.auction_server_map[x.auction_id].uuid,
+                                                              [ServerPlaceAuction(x.auction_id, self.auction_server_map[x.auction_id].uuid,  # noqa
                                                                                   x.item_name, x.starting_price, x.current_price, x.item_owner,
                                                                                   x.current_bidder, x.item_owner, x.client_address, False) for x in
                                                                self.auction_manager.get_all_auctions().auctions]),
@@ -444,7 +445,8 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                                        auction.starting_bid, auction.starting_bid,
                                        auction.auction_owner, None,
                                        auction.owner_id,
-                                       auction.request_address),
+                                       auction.notification_address,
+                                       response_address=auction.request_address),
                     server.tcp_address)
                 if response:
                     self.auction_server_map[auction_id] = copy.copy(server)
@@ -456,7 +458,8 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                                                          auction.starting_bid, auction.starting_bid,
                                                          auction.auction_owner, None,
                                                          auction.owner_id,
-                                                         auction.request_address))
+                                                         auction.notification_address,
+                                                         response_address=auction.request_address))
 
     def place_server_auction(self, data: ServerPlaceAuction):
         if data.processing_server_id != self.server_id:
@@ -465,7 +468,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         self.auction_manager.add_auction(data)
         self.auction_server_map[data.auction_id] = self.server_id_map[self.server_id]
         if not data.reassignment:
-            self.send_socket.send_data(AuctionPlaceResponse(True, data.auction_id, "Auction was placed"), data.client_address)
+            self.send_socket.send_data(AuctionPlaceResponse(True, data.auction_id, "Auction was placed"), data.response_address)
         self.middleware.send_multicast(
             MulticastNewAction(data.auction_id, data.processing_server_id,
                                data.title, data.starting_bid, data.current_bid,
@@ -487,6 +490,9 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             response = self.auction_manager.handle_bid(bid)
             if response.success:
                 self.middleware.send_multicast(MulticastNewBid(bid.auction_id, bid.bid, bid.name), self.multicast_address)
+                self.send_socket.send_data(AuctionBidInformation(bid.auction_id, bid.name, bid.bid),
+                                           self.auction_manager.auctions[bid.auction_id].client_address)
+
             self.send_socket.send_data(response, bid.request_address)
 
     async def handle_fail_of_server(self, data: FailStopMsg):

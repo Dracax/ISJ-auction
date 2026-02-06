@@ -1,17 +1,18 @@
 import logging
-
+import threading
 import uuid
-from request.AbstractData.AuctionData import AuctionData
+
 from client.Client import Client
-from request.AuctionRetrieveRequest import AuctionRetrieveRequest
-from request.AbstractData.RetrieveAuctions import RetrieveAuctions
 from request.AbstractData.AuctionBid import AuctionBid
-from request.AbstractData.PlaceAuctionData import PlaceAuctionData
-from request.AbstractData.SubscribeAuction import SubscribeAuction
+from request.AbstractData.AuctionBidInformation import AuctionBidInformation
 from request.AbstractData.AuctionBidResponse import AuctionBidResponse
-from request.AbstractData.RetrieveAuctionsResponse import RetrieveAuctionsResponse
-from request.AbstractData.NotLeaderResponse import NotLeaderResponse
 from request.AbstractData.AuctionBidResponse import AuctionPlaceResponse
+from request.AbstractData.AuctionData import AuctionData
+from request.AbstractData.NotLeaderResponse import NotLeaderResponse
+from request.AbstractData.PlaceAuctionData import PlaceAuctionData
+from request.AbstractData.RetrieveAuctions import RetrieveAuctions
+from request.AbstractData.RetrieveAuctionsResponse import RetrieveAuctionsResponse
+
 
 class AuctionServer:
     """
@@ -21,6 +22,10 @@ class AuctionServer:
     def __init__(self):
         self.client = Client()
         self.client.start()
+        threading.Thread(target=self.receive_messages, daemon=True).start()
+
+        self.own_auctions: dict[int, PlaceAuctionData] = {}
+        self.not_approved_auction: PlaceAuctionData | None = None
 
     def retrieve_auctions(self, open_only: bool = True) -> list[AuctionData]:
         """
@@ -45,7 +50,7 @@ class AuctionServer:
             msg_2 = self.client.receive_only(timeout=20)
             if msg_2:
                 self.handle_messages(msg_2)
-            else: 
+            else:
                 print('Dynamic discovery')
                 self.client._start_dynamic_discovery(self.client.get_broadcast_address(), 8000)
                 self.client.client_socket.send_data(request, self.client.server_to_talk_to)
@@ -54,11 +59,6 @@ class AuctionServer:
                     self.handle_messages(msg_3)
                 else:
                     print("Unable to reach servers.")
-
-
-
-
-
 
     def place_auction(self, title: str, starting_price: float, name: str):
         """
@@ -72,7 +72,8 @@ class AuctionServer:
         :param name: Description
         :type name: str
         """
-        new_auction = PlaceAuctionData(self.client.address, title, starting_price, name, self.client.client_id)
+        new_auction = PlaceAuctionData(self.client.address, title, starting_price, name, self.client.client_id, self.client.notification_address)
+        self.not_approved_auction = new_auction
         self.client.client_socket.send_data(new_auction, self.client.server_to_talk_to)
         msg = self.client.receive_only(timeout=20)
         if msg:
@@ -85,7 +86,7 @@ class AuctionServer:
             self.client.client_socket.send_data(new_auction, self.client.server_to_talk_to)
             msg_2 = self.client.receive_only(timeout=20)
             if msg_2:
-                self.handle_messagess(msg_2)
+                self.handle_messages(msg_2)
             else:
                 print("Dynamic discovery")
                 self.client._start_dynamic_discovery(self.client.get_broadcast_address(), 80000)
@@ -95,10 +96,8 @@ class AuctionServer:
                     self.handle_messages(msg_3)
                 else:
                     print("Unable to reach servers.")
-                  
-        
 
-    def send_bid(self, auction_id: int, amount : float, name: str):
+    def send_bid(self, auction_id: int, amount: float, name: str):
         """
         Sends bid for auction: auction_id with amount bid to server side. 
         
@@ -120,7 +119,7 @@ class AuctionServer:
             msg_2 = self.client.receive_only(timeout=20)
             if msg_2:
                 self.handle_messages(msg_2)
-            else: 
+            else:
                 print('Nothing received, starting Dynamic discovery')
                 self.client._start_dynamic_discovery(self.client.get_broadcast_address(), 8000)
                 self.client.client_socket.send_data(bid, self.client.server_to_talk_to)
@@ -130,12 +129,17 @@ class AuctionServer:
                 else:
                     print("Unable to reach servers.")
 
-    
-    #def subscribe_2_auction(self, auction_id: int):
+    # def subscribe_2_auction(self, auction_id: int):
     #    sub = SubscribeAuction(self.client.address, auction_id, self.client.client_id)
     #    self.client.client_socket.send_data(sub, self.client.server_to_talk_to)
-    
-    #Where do we place receive function?
+
+    def receive_messages(self):
+        while True:
+            data, _addr = self.client.incoming_msg_queue.get()
+            if data:
+                self.handle_messages(data)
+
+    # Where do we place receive function?
     def handle_messages(self, response):
         if isinstance(response, AuctionBidResponse):
             if response.success:
@@ -155,8 +159,13 @@ class AuctionServer:
             return True
         elif isinstance(response, AuctionPlaceResponse):
             print(response.message)
+            if response.success and self.not_approved_auction is not None:
+                self.own_auctions[response.auction_id] = self.not_approved_auction
+                self.not_approved_auction = None
             return False
+        elif isinstance(response, AuctionBidInformation):
+            print(f"New bid on auction {self.own_auctions[response.auction_id].title}: {response.bid_amount} by {response.bidder}")
+            return
         else:
             print('Unknown return message.')
             return False
-

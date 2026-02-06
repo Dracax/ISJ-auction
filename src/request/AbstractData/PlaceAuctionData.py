@@ -12,3 +12,4 @@ class PlaceAuctionData(AbstractClientRequest):
     starting_bid: float
     auction_owner: str
     owner_id: UUID
+    notification_address: tuple[str, int]
