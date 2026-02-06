@@ -52,6 +52,7 @@ class HeartbeatSenderModule:
     def handle_ack(self, data: MulticastHeartbeatAck):
         logging.debug(f"Received ack: {data.server}")
         self.received_acks.add(data.server)
+        self.server_map[data.server] = 0
 
     async def check_received(self):
         logging.debug("Checking received acks...")
