@@ -234,6 +234,9 @@ class MsgMiddleware:
             await self.message_queue.put((data, addr))
 
     async def _handle_multicast_message(self, data: AbstractMulticastData, addr):
+        if isinstance(data, MulticastMsgRequest):
+            self._handle_nack_request(data, addr)
+            return
         if data.sender_uuid == self.server_id:
             return  # ignore own messages
         self._handle_new_server(data)
