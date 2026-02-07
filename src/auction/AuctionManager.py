@@ -16,7 +16,9 @@ class AuctionManager:
 
     def add_auction(self, auction: ServerPlaceAuction):
         self.auctions[auction.auction_id] = AuctionData(auction.auction_id, auction.title, auction.current_bid,
-                                                        auction.starting_bid, auction.current_bidder, auction.auction_owner, auction.client_address)
+                                                        auction.starting_bid, auction.current_bidder, auction.current_bidder_address,
+                                                        auction.auction_owner,
+                                                        auction.client_address)
         logging.info(f"Auction added: {auction}")
 
     def handle_bid(self, bid: AuctionBid) -> AuctionBidResponse:
@@ -26,6 +28,7 @@ class AuctionManager:
         if self.auctions[bid.auction_id].current_price < bid.bid:
             self.auctions[bid.auction_id].current_price = bid.bid
             self.auctions[bid.auction_id].current_bidder = bid.name
+            self.auctions[bid.auction_id].current_bidder_address = bid.notification_address
             logging.info(f"Auction updated: {self.auctions[bid.auction_id]}")
             return AuctionBidResponse(True, bid.bid_id, "Bid accepted.")
         else:

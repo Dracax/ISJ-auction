@@ -18,3 +18,4 @@ class ServerPlaceAuction(AbstractData):
     client_address: tuple[str, int]
     reassignment: bool = False
     response_address: tuple[str, int] | None = None
+    current_bidder_address: tuple[str, int] | None = None

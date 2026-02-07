@@ -13,3 +13,4 @@ class AuctionBid(AbstractClientRequest):
     auction_id: int
     bid: float
     name: str
+    notification_address: tuple[str, int]

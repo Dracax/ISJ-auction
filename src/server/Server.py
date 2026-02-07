@@ -12,7 +12,6 @@ from AbstractClientOrServer import AbstractClientOrServer
 from ServerDataRepresentation import ServerDataRepresentation
 from Socket import Socket
 from auction.AuctionManager import AuctionManager
-from auction.AuctionModel import Auction
 from request.AbstractData.AbstractClientRequest import AbstractClientRequest
 from request.AbstractData.AuctionBid import AuctionBid
 from request.AbstractData.AuctionBidInformation import AuctionBidInformation
@@ -85,9 +84,6 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         self.auction_server_map: dict[int, ServerDataRepresentation] = {}
         self.server_id_map: dict[uuid.UUID, ServerDataRepresentation] = {}
 
-        # dict of auctions
-        self.auctions: dict[int, Auction] = {}
-
         # Heartbeat
         self.heartbeat_sender_task = None
         self.heartbeat_sender: HeartbeatSenderModule = None
@@ -128,7 +124,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         self.broadcast_socket.bind(ADDRESS)
 
         self.auction_manager = AuctionManager()
-        await self.dynamic_discovery_server_broadcast(
+        self.dynamic_discovery_server_broadcast(
             self.get_broadcast_address(),
             self.SERVER_BROADCAST_PORT)
 
@@ -180,13 +176,25 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             self.middleware.add_server(data.uuid)
 
             self.send_socket.send_data(MulticastGroupResponse(self.MULTICAST_GROUP, self.multicast_port, self.server_group_view,
-                                                              [ServerPlaceAuction(x.auction_id, self.auction_server_map[x.auction_id].uuid,  # noqa
-                                                                                  x.item_name, x.starting_price, x.current_price, x.item_owner,
-                                                                                  x.current_bidder, x.item_owner, x.client_address, False) for x in
+                                                              [{"auction_id": x.auction_id,
+                                                                "processing_server_id": self.auction_server_map[x.auction_id].uuid,
+                                                                "responsible_server_ip": self.auction_server_map[x.auction_id].ip,
+                                                                "responsible_server_port": self.auction_server_map[x.auction_id].port,
+                                                                "responsible_server_tcp_port":
+                                                                    self.auction_server_map[x.auction_id].tpc_port,
+                                                                "title": x.item_name,
+                                                                "starting_bid": x.starting_price,
+                                                                "current_bid": x.current_price,
+                                                                "auction_owner": x.item_owner,
+                                                                "current_bidder": x.current_bidder,
+                                                                "owner_id": x.item_owner,
+                                                                "client_address": x.client_address,
+                                                                "reassignment": False,
+                                                                "current_bidder_address": x.current_bidder_address} for x in
                                                                self.auction_manager.get_all_auctions().auctions]),
                                        data.request_address)
 
-    async def dynamic_discovery_server_broadcast(self, ip, port):
+    def dynamic_discovery_server_broadcast(self, ip, port):
         """Blocking method - should be run in executor."""
         logging.debug("Starting broadcast sender")
 
@@ -206,8 +214,13 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             self.server_group_view.extend([ServerDataRepresentation.of(x) for x in data.group_view])
             self.server_id_map.update({x.uuid: x for x in self.server_group_view})
             for auction in data.auctions:
-                del auction["data_type"]
-                self.auction_manager.add_auction(ServerPlaceAuction(**auction))
+                server_ip = auction.pop("responsible_server_ip")
+                server_port = auction.pop("responsible_server_port")
+                server_tcp_port = auction.pop("responsible_server_tcp_port")
+                place_auction = ServerPlaceAuction(**auction)
+                self.auction_manager.add_auction(place_auction)
+                self.auction_server_map[place_auction.auction_id] = ServerDataRepresentation(place_auction.processing_server_id, server_ip,
+                                                                                             server_port, server_tcp_port)
         else:
             logging.info("No broadcast response received, creating new multicast group")
             self.multicast_socket = self.setup_multicast_socket(self.MULTICAST_GROUP,
@@ -487,11 +500,20 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             logging.info(f"Forwarding bid for auction {bid.auction_id} to server {responsible_server.uuid}")
             self.send_socket.send_data(bid, (responsible_server.ip, responsible_server.port))
         else:
+            old_highest_bidder = None
+            if bid.auction_id in self.auction_manager.auctions:
+                old_highest_bidder = self.auction_manager.auctions[bid.auction_id].current_bidder_address
             response = self.auction_manager.handle_bid(bid)
             if response.success:
                 self.middleware.send_multicast(MulticastNewBid(bid.auction_id, bid.bid, bid.name), self.multicast_address)
-                self.send_socket.send_data(AuctionBidInformation(bid.auction_id, bid.name, bid.bid),
-                                           self.auction_manager.auctions[bid.auction_id].client_address)
+                self.send_socket.send_data(
+                    AuctionBidInformation(bid.auction_id, self.auction_manager.auctions[bid.auction_id].item_name, bid.name, bid.bid),
+                    self.auction_manager.auctions[bid.auction_id].client_address)
+                if old_highest_bidder:
+                    self.send_socket.send_data(
+                        AuctionBidInformation(bid.auction_id, self.auction_manager.auctions[bid.auction_id].item_name, bid.name, bid.bid,
+                                              outbid=True),
+                        old_highest_bidder)
 
             self.send_socket.send_data(response, bid.request_address)
 
@@ -524,7 +546,8 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                                                                       auction.starting_price, auction.current_price, auction.item_owner,
                                                                       auction.current_bidder,
                                                                       None,
-                                                                      auction.client_address, True),
+                                                                      auction.client_address, True,
+                                                                      current_bidder_address=auction.current_bidder_address),
                                                    (server.ip, server.port))
                         break
                 else:

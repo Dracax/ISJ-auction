@@ -104,7 +104,7 @@ class AuctionServer:
         :param self: auction_id: int, bid: float
         """
         bid_uuid = uuid.uuid4()
-        bid = AuctionBid(self.client.address, self.client.client_id, bid_uuid, auction_id, amount, name)
+        bid = AuctionBid(self.client.address, self.client.client_id, bid_uuid, auction_id, amount, name, self.client.notification_address)
         self.client.client_socket.send_data(bid, self.client.server_to_talk_to)
         logging.debug("Send Bid")
         msg = self.client.receive_only(timeout=20)
@@ -149,7 +149,7 @@ class AuctionServer:
                 print(f"Bid {response.bid_id} rejected: {response.message}")
                 return False
         elif isinstance(response, RetrieveAuctionsResponse):
-            print('Currently ongoing auctions:')
+            print('Currently ongoing auctions:') if response.auctions else print('No ongoing auctions.')
             for auction in response.auctions:
                 print(f"Auction_Id: {auction['auction_id']}, Item: {auction['item_name']}, Current Price: {auction['current_price']}")
             return False
@@ -164,7 +164,11 @@ class AuctionServer:
                 self.not_approved_auction = None
             return False
         elif isinstance(response, AuctionBidInformation):
-            print(f"New bid on auction {self.own_auctions[response.auction_id].title}: {response.bid_amount} by {response.bidder}")
+            if response.outbid:
+                print(
+                    f"You have been outbid on auction {response.name}! New bid: {response.bid_amount} by {response.bidder}")
+            else:
+                print(f"New bid on auction {response.name}: {response.bid_amount} by {response.bidder}")
             return
         else:
             print('Unknown return message.')

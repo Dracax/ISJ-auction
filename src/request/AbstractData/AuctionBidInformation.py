@@ -7,5 +7,7 @@ from request.AbstractData.AbstractData import register_data_type, DataType, Abst
 @dataclasses.dataclass
 class AuctionBidInformation(AbstractData):
     auction_id: int
+    name: str
     bidder: str
     bid_amount: float
+    outbid: bool = False
