@@ -7,8 +7,8 @@ from request.AbstractData.MulticastHeartbeatAck import MulticastHeartbeatAck
 
 class HeartbeatSenderModule:
     # Sends a Heartbeat message every x seconds
-    HEARTBEAT_INTERVAL = 5
-    LEADER_TIMEOUT = 5
+    HEARTBEAT_INTERVAL = 2
+    LEADER_TIMEOUT = 6
     # After x seconds, get 1/x missable ACK noted in server_map - 2-3* Heartbeat Interval (tolerance for network jitter, ...)->4-6sec
     TIMEOUT = 2
     # After missing this amount of ACK, consequences like removing the Server from group
