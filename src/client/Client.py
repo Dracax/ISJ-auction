@@ -54,7 +54,7 @@ class Client(threading.Thread, AbstractClientOrServer):
 
         self.client_socket.sendto("Hello Server".encode(), self.server_to_talk_to)  # only for testing
 
-    def _start_dynamic_discovery(self, ip, port=37020):
+    def _start_dynamic_discovery(self, ip, port):
         logging.debug("Starting broadcast sender")
 
         broadcast_socket = self.create_broadcast_socket()

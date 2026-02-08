@@ -12,6 +12,9 @@ class AuctionShell(cmd.Cmd):
         self.player: Person | None = None
         self.server = AuctionServer()
 
+    def emptyline(self):
+        pass
+    
     def do_list(self, arg):
         "List open items: list"
         self.server.retrieve_auctions()

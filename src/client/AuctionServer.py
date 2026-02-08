@@ -89,7 +89,7 @@ class AuctionServer:
                 self.handle_messages(msg_2)
             else:
                 print("Dynamic discovery")
-                self.client._start_dynamic_discovery(self.client.get_broadcast_address(), 80000)
+                self.client._start_dynamic_discovery(self.client.get_broadcast_address(), 8000)
                 self.client.client_socket.send_data(new_auction, self.client.server_to_talk_to)
                 msg_3 = self.client.receive_only(timeout=20)
                 if msg_3:
