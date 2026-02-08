@@ -535,8 +535,10 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         self.auction_server_map = {auction_id: server for auction_id, server in self.auction_server_map.items() if server.uuid != data.stop_id}
 
         if self.is_leader():
+            logging.info("Reassigning auctions of failed server %s", data.stop_id)
             for auction_id in auctions_of_failed_server:
                 for server in self.server_group_view:
+                    logging.info("Checking server %s for reassignment of auction %d", server.uuid, auction_id)
                     if server.uuid != self.server_id and server.uuid != data.stop_id:
                         self.auction_server_map[auction_id] = server
                         logging.info("Reassigning auction %d to server %s", auction_id, server.uuid)

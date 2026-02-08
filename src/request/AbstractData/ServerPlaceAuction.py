@@ -19,3 +19,7 @@ class ServerPlaceAuction(AbstractData):
     reassignment: bool = False
     response_address: tuple[str, int] | None = None
     current_bidder_address: tuple[str, int] | None = None
+
+    def __post_init__(self):
+        if self.processing_server_id is not None and not isinstance(self.processing_server_id, UUID):
+            self.processing_server_id = UUID(self.processing_server_id)
