@@ -24,17 +24,17 @@ class AuctionManager:
     def handle_bid(self, bid: AuctionBid) -> AuctionBidResponse:
         if bid.auction_id not in self.auctions:
             logging.warning(f"Auction ID {bid.auction_id} not found.")
-            return AuctionBidResponse(False, bid.bid_id, "Auction not found.")
+            return AuctionBidResponse(False, bid.bid_id, "Auction not found.", None)
         if self.auctions[bid.auction_id].current_price < bid.bid:
             self.auctions[bid.auction_id].current_price = bid.bid
             self.auctions[bid.auction_id].current_bidder = bid.name
             self.auctions[bid.auction_id].current_bidder_address = bid.notification_address
             logging.info(f"Auction updated: {self.auctions[bid.auction_id]}")
-            return AuctionBidResponse(True, bid.bid_id, "Bid accepted.")
+            return AuctionBidResponse(True, bid.bid_id, "Bid accepted.", self.auctions[bid.auction_id].item_name)
         else:
             logging.info(
                 f"Bid was not high enough. Current price: {self.auctions[bid.auction_id].current_price}, Bid: {bid.bid}")
-            return AuctionBidResponse(False, bid.bid_id, "Bid too low.")
+            return AuctionBidResponse(False, bid.bid_id, "Bid too low.", self.auctions[bid.auction_id].item_name)
 
     def get_all_auctions(self) -> RetrieveAuctionsResponse:
         return RetrieveAuctionsResponse(list(self.auctions.values()))

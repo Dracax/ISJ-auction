@@ -294,7 +294,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         await self.announce_leadership()
 
     async def announce_leadership(self):
-        self.middleware.send_multicast(BullyElectedLeaderRequest("Host idk TODO", self.server_id, self.ip, self.port, self.tcp_port),
+        self.middleware.send_multicast(BullyElectedLeaderRequest(self.server_id, self.ip, self.port, self.tcp_port),
                                        (self.MULTICAST_GROUP, self.multicast_port))
         self.leader = self.server_id_map[self.server_id]
 
@@ -333,7 +333,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                 if not self._heartbeat_event.is_set():
                     await asyncio.wait_for(
                         self._heartbeat_event.wait(),
-                        timeout=HeartbeatSenderModule.LEADER_TIMEOUT  # TODO: No hardcode
+                        timeout=HeartbeatSenderModule.LEADER_TIMEOUT
                     )
 
                 # Heartbeat received
@@ -345,7 +345,6 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             except asyncio.TimeoutError:
                 logging.warning("heartbeat event timed out")
 
-                # TODO: I do not receive the multicast myself, put the same logic here (remove leader from group view, start bully algo, ...)
                 # No heartbeat within timeout
                 await self.on_heartbeat_timeout(self.leader.uuid, True)
                 break
@@ -355,7 +354,6 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
 
     async def on_heartbeat_timeout(self, crashed_server_id: uuid.UUID, is_leader: bool):
         msg = FailStopMsg(crashed_server_id, is_leader, [])
-        # TODO: Handle Open Transactions of leader
         self.middleware.send_multicast(msg, self.multicast_address)
 
         await self.handle_fail_of_server(msg)
@@ -402,7 +400,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                         self.heartbeat_sender.handle_ack(data)
                     case UnicastVoteRequest():  # Is called by a Server which is performing bully Algo. If their ID is lower, send back a participation message (makes them stop bully for a timeout period)
                         if data.uuid < self.server_id:
-                            self.unicast_socket.send_data(BullyAcceptVotingParticipationResponse("idk TODO", self.server_id, self.ip, self.port),
+                            self.unicast_socket.send_data(BullyAcceptVotingParticipationResponse(self.server_id, self.ip, self.port),
                                                           (data.ip, data.port))
                             if self._bully_task is not None:
                                 self.cancel_bully_task()
@@ -520,7 +518,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
     async def handle_fail_of_server(self, data: FailStopMsg):
         logging.info("Received fail stop msg from %s", data.stop_id)
 
-        # If the apparently failed server is myself TODO: Instead of kms, try to re-join the group
+        # If the apparently failed server is myself
         if data.stop_id == self.server_id:
             await self.stop()
 
@@ -529,7 +527,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
         if data.is_leader:
             logging.info("Leader has failed, starting bully algo")
             self.leader = None
-            await self.bully_algo()  # TODO
+            await self.bully_algo()
 
         auctions_of_failed_server = [auction_id for auction_id, server in self.auction_server_map.items() if server.uuid == data.stop_id]
         self.auction_server_map = {auction_id: server for auction_id, server in self.auction_server_map.items() if server.uuid != data.stop_id}

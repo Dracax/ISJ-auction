@@ -146,7 +146,7 @@ class AuctionServer:
                 print(response.message)
                 return False
             else:
-                print(f"Bid {response.bid_id} rejected: {response.message}")
+                print(f"Bid {response.name} rejected: {response.message}")
                 return False
         elif isinstance(response, RetrieveAuctionsResponse):
             print('Currently ongoing auctions:') if response.auctions else print('No ongoing auctions.')

@@ -10,6 +10,7 @@ from request.AbstractData.AbstractResponse import AbstractResponse
 class AuctionBidResponse(AbstractResponse):
     bid_id: UUID  # id for the bid
     message: str
+    name: str
 
 
 @register_data_type(DataType.AUCTION_PLACE_RESPONSE)
