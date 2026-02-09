@@ -486,7 +486,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             MulticastNewAction(data.auction_id, data.processing_server_id,
                                data.title, data.starting_bid, data.current_bid,
                                data.auction_owner, data.current_bidder, data.owner_id, data.client_address,
-                               processing_server_ip=self.ip, processing_server_port=self.port),
+                               processing_server_ip=self.ip, processing_server_port=self.port, current_bidder_address=data.current_bidder_address),
             (self.MULTICAST_GROUP, self.multicast_port))
 
     async def handle_bid(self, bid: AuctionBid):
@@ -505,7 +505,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
                 old_highest_bidder = self.auction_manager.auctions[bid.auction_id].current_bidder_address
             response = self.auction_manager.handle_bid(bid)
             if response.success:
-                self.middleware.send_multicast(MulticastNewBid(bid.auction_id, bid.bid, bid.name), self.multicast_address)
+                self.middleware.send_multicast(MulticastNewBid(bid.auction_id, bid.bid, bid.name, bid.notification_address), self.multicast_address)
                 self.send_socket.send_data(
                     AuctionBidInformation(bid.auction_id, self.auction_manager.auctions[bid.auction_id].item_name, bid.name, bid.bid),
                     self.auction_manager.auctions[bid.auction_id].client_address)

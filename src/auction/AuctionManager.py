@@ -48,6 +48,7 @@ class AuctionManager:
         if data.auction_id in self.auctions:
             self.auctions[data.auction_id].current_price = data.new_bid
             self.auctions[data.auction_id].current_bidder = data.new_bidder
+            self.auctions[data.auction_id].current_bidder_address = data.notification_address
             logging.info(f"Auction bid updated via multicast: {self.auctions[data.auction_id]}")
         else:
             logging.warning(f"Auction ID {data.auction_id} not found for multicast bid update.")

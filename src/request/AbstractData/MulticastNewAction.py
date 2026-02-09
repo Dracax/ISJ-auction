@@ -19,6 +19,7 @@ class MulticastNewAction(AbstractMulticastData):
     client_address: tuple[str, int]
     processing_server_ip: str
     processing_server_port: int
+    current_bidder_address: tuple[str, int] | None = None
 
 
 @register_data_type(DataType.MULTICAST_NEW_BID)
@@ -27,3 +28,4 @@ class MulticastNewBid(AbstractMulticastData):
     auction_id: int
     new_bid: float
     new_bidder: str | None
+    notification_address: tuple[str, int] | None = None
