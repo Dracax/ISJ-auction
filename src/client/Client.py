@@ -52,8 +52,6 @@ class Client(threading.Thread, AbstractClientOrServer):
         threading.Thread(target=self.wait_for_notifications, daemon=True).start()
         thread.join()
 
-        self.client_socket.sendto("Hello Server".encode(), self.server_to_talk_to)  # only for testing
-
     def _start_dynamic_discovery(self, ip, port):
         logging.debug("Starting broadcast sender")
 
