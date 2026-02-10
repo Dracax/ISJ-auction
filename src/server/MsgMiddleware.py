@@ -85,8 +85,8 @@ class MsgMiddleware:
 
         try:
             while True:
-                # Read data (up to 1024 bytes)
-                data = await reader.read(1024)
+                # Read data (up to 4096 bytes)
+                data = await reader.read(4096)
                 if not data:
                     break  # Connection closed by peer
 
