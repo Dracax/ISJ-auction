@@ -492,7 +492,7 @@ class Server(multiprocessing.Process, AbstractClientOrServer):
             if not self.is_leader():
                 return
             logging.error("Auction ID not found in auction server map", exc_info=True)
-            self.send_socket.send_data(AuctionBidResponse(False, bid.bid_id, "Auction not found."), bid.request_address)
+            self.send_socket.send_data(AuctionBidResponse(False, bid.bid_id, "Auction not found.", None), bid.request_address)
         elif self.is_leader() and self.auction_server_map[bid.auction_id].uuid != self.server_id:
             responsible_server = self.auction_server_map[bid.auction_id]
             logging.info(f"Forwarding bid for auction {bid.auction_id} to server {responsible_server.uuid}")
