@@ -37,7 +37,7 @@ class AuctionServer:
         request = RetrieveAuctions(self.client.address, self.client.client_id)
 
         self.client.client_socket.send_data(request, self.client.server_to_talk_to)
-        msg = self.client.receive_only(timeout=20)
+        msg = self.client.receive_only(timeout=3)
         resend = False
         if msg:
             resend = self.handle_messages(msg)
@@ -47,14 +47,14 @@ class AuctionServer:
         else:
             print('No response. Resending request.')
             self.client.client_socket.send_data(request, self.client.server_to_talk_to)
-            msg_2 = self.client.receive_only(timeout=20)
+            msg_2 = self.client.receive_only(timeout=3)
             if msg_2:
                 self.handle_messages(msg_2)
             else:
                 print('Dynamic discovery')
                 self.client._start_dynamic_discovery(self.client.get_broadcast_address(), 8000)
                 self.client.client_socket.send_data(request, self.client.server_to_talk_to)
-                msg_3 = self.client.receive_only(timeout=20)
+                msg_3 = self.client.receive_only(timeout=3)
                 if msg_3:
                     self.handle_messages(msg_3)
                 else:
@@ -75,7 +75,7 @@ class AuctionServer:
         new_auction = PlaceAuctionData(self.client.address, title, starting_price, name, self.client.client_id, self.client.notification_address)
         self.not_approved_auction = new_auction
         self.client.client_socket.send_data(new_auction, self.client.server_to_talk_to)
-        msg = self.client.receive_only(timeout=20)
+        msg = self.client.receive_only(timeout=3)
         if msg:
             resend = self.handle_messages(msg)
             if resend:
@@ -84,14 +84,14 @@ class AuctionServer:
         else:
             print('No response. Resending request.')
             self.client.client_socket.send_data(new_auction, self.client.server_to_talk_to)
-            msg_2 = self.client.receive_only(timeout=20)
+            msg_2 = self.client.receive_only(timeout=3)
             if msg_2:
                 self.handle_messages(msg_2)
             else:
                 print("Dynamic discovery")
                 self.client._start_dynamic_discovery(self.client.get_broadcast_address(), 8000)
                 self.client.client_socket.send_data(new_auction, self.client.server_to_talk_to)
-                msg_3 = self.client.receive_only(timeout=20)
+                msg_3 = self.client.receive_only(timeout=3)
                 if msg_3:
                     self.handle_messages(msg_3)
                 else:
@@ -107,7 +107,7 @@ class AuctionServer:
         bid = AuctionBid(self.client.address, self.client.client_id, bid_uuid, auction_id, amount, name, self.client.notification_address)
         self.client.client_socket.send_data(bid, self.client.server_to_talk_to)
         logging.debug("Send Bid")
-        msg = self.client.receive_only(timeout=20)
+        msg = self.client.receive_only(timeout=3)
         if msg:
             resend = self.handle_messages(msg)
             if resend:
@@ -116,14 +116,14 @@ class AuctionServer:
         else:
             print('No response. Resending request.')
             self.client.client_socket.send_data(bid, self.client.server_to_talk_to)
-            msg_2 = self.client.receive_only(timeout=20)
+            msg_2 = self.client.receive_only(timeout=3)
             if msg_2:
                 self.handle_messages(msg_2)
             else:
                 print('Nothing received, starting Dynamic discovery')
                 self.client._start_dynamic_discovery(self.client.get_broadcast_address(), 8000)
                 self.client.client_socket.send_data(bid, self.client.server_to_talk_to)
-                msg_3 = self.client.receive_only(timeout=20)
+                msg_3 = self.client.receive_only(timeout=3)
                 if msg_3:
                     self.handle_messages(msg_3)
                 else:
